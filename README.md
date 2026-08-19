@@ -4,10 +4,10 @@
 
 ### Integrantes:
 
-Salvador Baez
+- Salvador Baez
 
-Mateo Nomico
+- Mateo Nomico
 
-Tomás Resnik
+- Tomás Resnik
 
 ## Lenguaje de programación: Python
