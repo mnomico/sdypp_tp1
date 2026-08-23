@@ -1,0 +1,32 @@
+# Credenciales y configuración sensible
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets/
+
+# Registros de actividad
+logs/
+*.log
+
+# Artefactos de las pruebas de humo del pipeline
+estado*.json
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+*.swp
+.DS_Store

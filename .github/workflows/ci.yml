@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gitleaks:
+    name: Deteccion de secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Escanear secrets con gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pruebas:
+    name: Pruebas (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compilar los modulos
+        run: python -m compileall -q comun hit1 hit2 hit3 hit4 hit5
+      - name: Pruebas del modulo comun
+        run: python -m unittest discover -s comun -t . -v
+      - name: Pruebas del Hit 1
+        run: python -m unittest discover -s hit1 -t . -v
+      - name: Pruebas del Hit 2
+        run: python -m unittest discover -s hit2 -t . -v
+      - name: Pruebas del Hit 3
+        run: python -m unittest discover -s hit3 -t . -v
+      - name: Pruebas del Hit 4
+        run: python -m unittest discover -s hit4 -t . -v
+      - name: Pruebas del Hit 5
+        run: python -m unittest discover -s hit5 -t . -v
+
+  humo:
+    name: Prueba de humo end-to-end
+    runs-on: ubuntu-latest
+    needs: pruebas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Hit 1 - A saluda y B responde
+        run: |
+          python -m hit1.servidor_b --puerto 9001 &
+          sleep 2
+          python -m hit1.cliente_a --puerto 9001
+      - name: Hit 3 - B sobrevive a que A muera y responde el health
+        run: |
+          python -m hit3.servidor_b --puerto 9003 --puerto-health 8080 &
+          PID_B=$!
+          sleep 2
+          python -m hit3.cliente_a --puerto 9003 &
+          PID_A=$!
+          sleep 2
+          kill -9 $PID_A
+          sleep 1
+          curl -sf http://127.0.0.1:8080/health | tee estado.json
+          grep -q '"estado": "ok"' estado.json
+          # B debe seguir atendiendo despues de que A murio de golpe
+          python -m hit3.cliente_a --puerto 9003 --max-ciclos 1 --salir-tras-respuesta
+          kill -9 $PID_B
+
+      - name: Hit 4 - dos nodos C se saludan mutuamente
+        run: |
+          python -m hit4.nodo_c --puerto 9401 --par-host 127.0.0.1 --par-puerto 9402 \
+                                --nombre C1 --puerto-health 8401 --duracion 12 &
+          python -m hit4.nodo_c --puerto 9402 --par-host 127.0.0.1 --par-puerto 9401 \
+                                --nombre C2 --sin-health --duracion 12 &
+          sleep 5
+          curl -sf http://127.0.0.1:8401/health | tee estado_c1.json
+          python - <<'PY'
+          import json
+          estado = json.load(open("estado_c1.json"))
+          assert estado["canal_saliente"] == "conectado", estado
+          assert estado["saludos_enviados"] >= 1, estado
+          assert estado["saludos_recibidos"] >= 1, estado
+          print("Hit 4 OK:", estado)
+          PY
+          wait
+
+      - name: Hit 5 - los mensajes viajan en JSON
+        run: |
+          python -m hit5.nodo_c --puerto 9501 --par-host 127.0.0.1 --par-puerto 9502 \
+                                --nombre C1 --puerto-health 8501 --duracion 12 &
+          python -m hit5.nodo_c --puerto 9502 --par-host 127.0.0.1 --par-puerto 9501 \
+                                --nombre C2 --sin-health --duracion 12 &
+          sleep 5
+          python - <<'PY'
+          import socket
+          from comun import mensajes
+          from comun.protocolo import LectorDeMensajes, enviar_mensaje
+
+          saludo = mensajes.crear_saludo("C-ci")
+          with socket.create_connection(("127.0.0.1", 9501), timeout=5) as sock:
+              enviar_mensaje(sock, mensajes.serializar(saludo))
+              respuesta = mensajes.deserializar(LectorDeMensajes(sock).leer_mensaje())
+
+          assert respuesta["tipo"] == "respuesta", respuesta
+          assert respuesta["origen"] == "C1", respuesta
+          assert respuesta["en_respuesta_a"] == saludo["id"], respuesta
+          print("Hit 5 OK:", respuesta)
+          PY
+          curl -sf http://127.0.0.1:8501/health | grep -q '"formato_mensajes": "json"'
+          wait

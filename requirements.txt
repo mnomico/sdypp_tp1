@@ -1,0 +1,10 @@
+# Los Hits #1 a #3 no requieren dependencias externas: se resuelven con la
+# biblioteca estándar de Python 3.11+ (socket, threading, logging, http.server,
+# unittest). La configuración se lee de variables de entorno / .env con un
+# lector propio (comun/config.py), sin python-dotenv.
+#
+# Instalación: pip install -r requirements.txt
+#
+# Dependencias previstas para hits posteriores (descomentar al implementarlos):
+# grpcio~=1.68          # Hit #8
+# grpcio-tools~=1.68    # Hit #8 (compilador protoc)
