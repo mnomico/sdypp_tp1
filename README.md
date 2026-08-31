@@ -26,8 +26,8 @@ instala nada en los Hits #1 a #3.
 | [#3](hit3/) | B sigue funcionando si A cierra la conexión | Completo |
 | [#4](hit4/) | Refactor de A y B en un único programa C | Completo |
 | [#5](hit5/) | Mensajes en formato JSON | Completo |
-| #6 | Nodo D como registro de contactos | Pendiente |
-| #7 | Sistema de inscripciones por ventanas de 1 min | Pendiente |
+| [#6](hit6/) | Nodo D como registro de contactos | Completo |
+| [#7](hit7/) | Sistema de inscripciones por ventanas de 1 min | Completo |
 | #8 | Migración a gRPC / Protobuf | Pendiente |
 
 Cada carpeta tiene su propio `README.md` con el diagrama de arquitectura, las
@@ -61,6 +61,16 @@ Cada hit es una carpeta autocontenida: código, `README.md` y sus propias prueba
 │   └── README.md
 ├── hit5/                # Nodo C con mensajes JSON
 │   └── ... (misma estructura)
+├── hit6/                # Nodo D como registro de contactos y puerto aleatorio
+│   ├── nodo_d.py
+│   ├── nodo_c.py
+│   ├── tests/
+│   └── README.md
+├── hit7/                # Sistema de inscripciones por ventanas de 1 min
+│   ├── nodo_d.py
+│   ├── nodo_c.py
+│   ├── tests/
+│   └── README.md
 ├── .env.example         # Plantilla de configuración (el .env real no se versiona)
 ├── requirements.txt
 └── .github/workflows/ci.yml
@@ -114,6 +124,20 @@ python -m hit4.nodo_c --puerto 9402 --par-host 127.0.0.1 --par-puerto 9401 --nom
 # Hit #5 — igual que el #4, pero los mensajes viajan en JSON
 python -m hit5.nodo_c --puerto 9501 --par-host 127.0.0.1 --par-puerto 9502 --nombre C1 --puerto-health 8501
 python -m hit5.nodo_c --puerto 9502 --par-host 127.0.0.1 --par-puerto 9501 --nombre C2 --sin-health
+
+# Hit #6 — Nodo D (registro) y múltiples nodos C con puerto aleatorio
+python -m hit6.nodo_d --puerto 9600 --puerto-health 8086
+python -m hit6.nodo_c --d-host 127.0.0.1 --d-puerto 9600 --nombre C1
+python -m hit6.nodo_c --d-host 127.0.0.1 --d-puerto 9600 --nombre C2
+python -m hit6.nodo_c --d-host 127.0.0.1 --d-puerto 9600 --nombre C3
+curl http://127.0.0.1:8086/health
+
+# Hit #7 — Sistema de inscripciones por ventanas (1 min) y persistencia JSON
+python -m hit7.nodo_d --puerto 9700 --puerto-health 8087
+python -m hit7.nodo_c --d-host 127.0.0.1 --d-puerto 9700 --nombre C1
+python -m hit7.nodo_c --d-host 127.0.0.1 --d-puerto 9700 --nombre C2
+curl http://127.0.0.1:8087/health
+cat logs/inscripciones_hit7.json
 ```
 
 Cada programa acepta `--help` con el detalle de sus parámetros.

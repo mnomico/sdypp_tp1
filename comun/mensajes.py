@@ -20,6 +20,10 @@ from datetime import datetime, timezone
 VERSION_PROTOCOLO = 1
 TIPO_SALUDO = "saludo"
 TIPO_RESPUESTA = "respuesta"
+TIPO_REGISTRO = "registro"
+TIPO_REGISTRO_RESPUESTA = "registro_respuesta"
+TIPO_CONSULTA_ACTIVOS = "consulta_activos"
+TIPO_CONSULTA_ACTIVOS_RESPUESTA = "consulta_activos_respuesta"
 CAMPOS_OBLIGATORIOS = ("tipo", "origen", "contenido")
 
 
@@ -52,6 +56,57 @@ def crear_respuesta(origen, saludo, contenido=None):
         "origen": origen,
         "contenido": contenido or f"Hola {remitente}, soy {origen}. Recibi tu saludo.",
         "en_respuesta_a": saludo.get("id"),
+        "timestamp": _ahora(),
+    }
+
+
+def crear_registro(origen, ip, puerto, contenido=None):
+    return {
+        "version": VERSION_PROTOCOLO,
+        "id": str(uuid.uuid4()),
+        "tipo": TIPO_REGISTRO,
+        "origen": origen,
+        "contenido": contenido or f"Registro de {origen} en {ip}:{puerto}",
+        "ip": ip,
+        "puerto": puerto,
+        "timestamp": _ahora(),
+    }
+
+
+def crear_registro_respuesta(origen, registro, nodos, contenido=None):
+    remitente = registro.get("origen", "desconocido")
+    return {
+        "version": VERSION_PROTOCOLO,
+        "id": str(uuid.uuid4()),
+        "tipo": TIPO_REGISTRO_RESPUESTA,
+        "origen": origen,
+        "contenido": contenido or f"Registro exitoso de {remitente}",
+        "en_respuesta_a": registro.get("id"),
+        "nodos": nodos,
+        "timestamp": _ahora(),
+    }
+
+
+def crear_consulta_activos(origen, contenido=None):
+    return {
+        "version": VERSION_PROTOCOLO,
+        "id": str(uuid.uuid4()),
+        "tipo": TIPO_CONSULTA_ACTIVOS,
+        "origen": origen,
+        "contenido": contenido or f"Consulta de activos por {origen}",
+        "timestamp": _ahora(),
+    }
+
+
+def crear_consulta_activos_respuesta(origen, consulta, nodos_activos, contenido=None):
+    return {
+        "version": VERSION_PROTOCOLO,
+        "id": str(uuid.uuid4()),
+        "tipo": TIPO_CONSULTA_ACTIVOS_RESPUESTA,
+        "origen": origen,
+        "contenido": contenido or "Listado de nodos activos",
+        "en_respuesta_a": consulta.get("id"),
+        "nodos_activos": nodos_activos,
         "timestamp": _ahora(),
     }
 
