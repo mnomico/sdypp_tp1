@@ -10,7 +10,7 @@ import sys
 import time
 
 from comun import config
-from comun.protocolo import ConexionCerrada, LectorDeMensajes, enviar_mensaje
+from comun.protocolo import ErrorDeProtocolo, LectorDeMensajes, enviar_mensaje
 from comun.registro import configurar
 
 HOST_POR_DEFECTO = config.texto("TP1_HOST", "127.0.0.1")
@@ -62,7 +62,7 @@ def ejecutar(
                 # cada `timeout` segundos aunque B siguiera perfectamente vivo.
                 sock.settimeout(None)
                 lector.leer_mensaje()
-        except (ConexionCerrada, OSError) as error:
+        except (ErrorDeProtocolo, OSError) as error:
             logger.warning(
                 "Comunicacion con B interrumpida (%s). Reintento en %.1fs",
                 error,

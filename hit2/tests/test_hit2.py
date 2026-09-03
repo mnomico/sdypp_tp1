@@ -2,6 +2,7 @@
 
 import logging
 import socket
+import struct
 import threading
 import time
 import unittest
@@ -124,6 +125,58 @@ class TestIntegracionHit2(unittest.TestCase):
         self.assertEqual(len(respuestas), 1)
         self.assertLess(time.monotonic() - comienzo, 2, "no debe esperar el cierre de B")
         hilo_b.join(timeout=2)
+
+    def test_b_termina_ordenado_si_a_muere_de_golpe(self):
+        """Regresión: un `kill -9` sobre A llega como RST (OSError), no como
+        cierre ordenado. B tiene que terminar limpio, no con un traceback."""
+        escucha = servidor_b.crear_socket_servidor("127.0.0.1", 0)
+        self.addCleanup(escucha.close)
+        puerto = escucha.getsockname()[1]
+        resultado = {}
+
+        def correr_b():
+            try:
+                resultado["saludos"] = servidor_b.atender_una_conexion(escucha, self.logger)
+            except BaseException as error:  # noqa: BLE001 - se reporta al test
+                resultado["error"] = error
+
+        hilo_b = threading.Thread(target=correr_b, daemon=True)
+        hilo_b.start()
+
+        abrupto = socket.create_connection(("127.0.0.1", puerto), timeout=5)
+        enviar_mensaje(abrupto, "Hola B, soy A")
+        LectorDeMensajes(abrupto).leer_mensaje()
+        # SO_LINGER en 0 fuerza un RST al cerrar: equivale a matar A.
+        abrupto.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        abrupto.close()
+
+        hilo_b.join(timeout=5)
+        self.assertFalse(hilo_b.is_alive(), "B debe terminar, no quedar colgado")
+        self.assertNotIn("error", resultado, f"B murio por excepcion: {resultado.get('error')!r}")
+        self.assertEqual(resultado["saludos"], ["Hola B, soy A"])
+
+    def test_b_descarta_lineas_ilegibles_sin_cortar(self):
+        """Bytes que no son UTF-8 no deben tumbar el canal ni el proceso."""
+        escucha = servidor_b.crear_socket_servidor("127.0.0.1", 0)
+        self.addCleanup(escucha.close)
+        puerto = escucha.getsockname()[1]
+        recibidos = {}
+
+        hilo_b = threading.Thread(
+            target=lambda: recibidos.update(
+                saludos=servidor_b.atender_una_conexion(escucha, self.logger)
+            ),
+            daemon=True,
+        )
+        hilo_b.start()
+
+        with socket.create_connection(("127.0.0.1", puerto), timeout=5) as sock:
+            sock.sendall(b"\xff\xfe\n")  # linea ilegible: se descarta
+            enviar_mensaje(sock, "Hola B, soy A")
+            self.assertIn("Hola B, soy A", LectorDeMensajes(sock).leer_mensaje())
+
+        hilo_b.join(timeout=5)
+        self.assertEqual(recibidos["saludos"], ["Hola B, soy A"])
 
     def test_a_reintenta_si_b_nunca_esta_disponible(self):
         """Sin B escuchando, A no debe abortar: reintenta con backoff creciente."""

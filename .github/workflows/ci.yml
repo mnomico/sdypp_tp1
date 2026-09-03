@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compilar los modulos
-        run: python -m compileall -q comun hit1 hit2 hit3 hit4 hit5
+        run: python -m compileall -q comun hit1 hit2 hit3 hit4 hit5 hit6 hit7
       - name: Pruebas del modulo comun
         run: python -m unittest discover -s comun -t . -v
       - name: Pruebas del Hit 1
@@ -45,6 +45,10 @@ jobs:
         run: python -m unittest discover -s hit4 -t . -v
       - name: Pruebas del Hit 5
         run: python -m unittest discover -s hit5 -t . -v
+      - name: Pruebas del Hit 6
+        run: python -m unittest discover -s hit6 -t . -v
+      - name: Pruebas del Hit 7
+        run: python -m unittest discover -s hit7 -t . -v
 
   humo:
     name: Prueba de humo end-to-end
@@ -117,4 +121,59 @@ jobs:
           print("Hit 5 OK:", respuesta)
           PY
           curl -sf http://127.0.0.1:8501/health | grep -q '"formato_mensajes": "json"'
+          wait
+
+      - name: Hit 6 - tres nodos C se descubren a traves del Nodo D
+        run: |
+          python -m hit6.nodo_d --puerto 9600 --puerto-health 8086 --duracion 20 &
+          sleep 2
+          for n in C1 C2 C3; do
+            python -m hit6.nodo_c --d-host 127.0.0.1 --d-puerto 9600 \
+                                  --nombre $n --sin-health --duracion 12 &
+            sleep 1
+          done
+          sleep 4
+          curl -sf http://127.0.0.1:8086/health | tee estado_d.json
+          python - <<'PY'
+          import json
+          estado = json.load(open("estado_d.json"))
+          assert estado["estado"] == "ok", estado
+          assert estado["cantidad_nodos_c_registrados"] == 3, estado
+          # Cada C escucha en un puerto aleatorio distinto asignado por el SO.
+          puertos = {n["puerto"] for n in estado["nodos"]}
+          assert len(puertos) == 3, estado
+          print("Hit 6 OK:", estado["nodos"])
+          PY
+          wait
+
+      - name: Hit 7 - ventanas de inscripcion persistidas en JSON
+        run: |
+          python -m hit7.nodo_d --puerto 9700 --puerto-health 8087 \
+                                --duracion-ventana 8 --duracion 30 &
+          sleep 2
+          python -m hit7.nodo_c --d-host 127.0.0.1 --d-puerto 9700 \
+                                --nombre C1 --sin-health --duracion 25 &
+          sleep 2
+          # Antes de la primera rotacion, C1 esta anotado para la ventana SIGUIENTE
+          curl -sf http://127.0.0.1:8087/health | tee estado_d7.json
+          python - <<'PY'
+          import json
+          estado = json.load(open("estado_d7.json"))
+          assert estado["cantidad_nodos_siguientes"] == 1, estado
+          assert estado["cantidad_nodos_activos"] == 0, estado
+          print("Hit 7 (pre-rotacion) OK:", estado["nodos_siguientes"])
+          PY
+          sleep 6   # se cruza la rotacion de ventana (a los 8s de arrancar D)
+          curl -sf http://127.0.0.1:8087/health | tee estado_d7_post.json
+          python - <<'PY'
+          import json, pathlib
+          estado = json.load(open("estado_d7_post.json"))
+          assert estado["cantidad_nodos_activos"] == 1, estado
+          # La consigna pide persistir las inscripciones en un archivo JSON.
+          archivo = pathlib.Path(estado["archivo_inscripciones"])
+          assert archivo.exists(), archivo
+          disco = json.loads(archivo.read_text(encoding="utf-8"))
+          assert disco["cantidad_nodos_activos"] == 1, disco
+          print("Hit 7 (post-rotacion) OK:", disco["nodos_activos"])
+          PY
           wait

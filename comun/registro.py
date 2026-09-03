@@ -30,6 +30,11 @@ def configurar(nombre, archivo=None, nivel=logging.INFO, directorio=None):
     """Devuelve (logger, handler_en_memoria) con salida a consola, disco y RAM."""
     logger = logging.getLogger(nombre)
     logger.setLevel(nivel)
+    # Cerrar antes de descartar: `clear()` saca los handlers de la lista pero el
+    # archivo de log queda abierto, y los descriptores se acumulan si se
+    # reconfigura el mismo logger (en Windows eso además bloquea la rotación).
+    for handler in logger.handlers:
+        handler.close()
     logger.handlers.clear()
     logger.propagate = False
 

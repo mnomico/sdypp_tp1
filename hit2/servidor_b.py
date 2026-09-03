@@ -9,7 +9,12 @@ import socket
 import sys
 
 from comun import config
-from comun.protocolo import ConexionCerrada, LectorDeMensajes, enviar_mensaje
+from comun.protocolo import (
+    ConexionCerrada,
+    LectorDeMensajes,
+    MensajeIlegible,
+    enviar_mensaje,
+)
 from comun.registro import configurar
 
 HOST_POR_DEFECTO = config.texto("TP1_HOST", "127.0.0.1")
@@ -39,8 +44,18 @@ def atender_una_conexion(servidor, logger):
             try:
                 saludo = lector.leer_mensaje()
             except ConexionCerrada:
-                logger.info("A cerro la conexion")
+                logger.info("A cerro la conexion ordenadamente")
                 break
+            except OSError as error:
+                # `kill -9` sobre A no cierra ordenado: llega un RST, que es un
+                # OSError. B igual termina (eso lo resuelve el Hit #3), pero
+                # saliendo limpio y dejando registro, no con un traceback.
+                logger.info("A murio de golpe (%s)", error)
+                break
+            except MensajeIlegible as error:
+                # Basura en el canal no justifica cortar: se descarta la linea.
+                logger.warning("Mensaje ilegible descartado: %s", error)
+                continue
             logger.info("Saludo recibido: %s", saludo)
             saludos.append(saludo)
             enviar_mensaje(conexion, construir_respuesta(saludo))

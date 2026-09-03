@@ -9,7 +9,7 @@ import socket
 import sys
 
 from comun import config
-from comun.protocolo import LectorDeMensajes, enviar_mensaje
+from comun.protocolo import ErrorDeProtocolo, LectorDeMensajes, enviar_mensaje
 from comun.registro import configurar
 
 HOST_POR_DEFECTO = config.texto("TP1_HOST", "127.0.0.1")
@@ -50,7 +50,13 @@ def main(argv=None):
     logger, _ = configurar("hit1.servidor_b")
     with crear_socket_servidor(args.host, args.puerto) as servidor:
         logger.info("B escuchando en %s:%s", args.host, args.puerto)
-        atender_una_conexion(servidor, logger)
+        try:
+            atender_una_conexion(servidor, logger)
+        except (ErrorDeProtocolo, OSError) as error:
+            # A puede irse antes de completar el saludo. B igual termina (es el
+            # alcance del hit), pero cerrando ordenado y dejandolo en el log.
+            logger.warning("A se desconecto antes de completar el saludo (%s)", error)
+            return 0
     logger.info("B finalizo tras atender una conexion")
     return 0
 

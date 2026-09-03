@@ -13,8 +13,10 @@ from comun import config
 from comun.health import iniciar_health
 from comun.protocolo import (
     ConexionCerrada,
+    ErrorDeProtocolo,
     LectorDeMensajes,
     MensajeDemasiadoLargo,
+    MensajeIlegible,
     enviar_mensaje,
 )
 from comun.registro import HandlerEnMemoria, configurar
@@ -70,6 +72,28 @@ class TestProtocolo(unittest.TestCase):
         lector = LectorDeMensajes(SocketFalso([sock.enviado]))
         self.assertEqual(lector.leer_mensaje(), "saludo con ñ y á")
 
+    def test_bytes_que_no_son_utf8_dan_error_de_protocolo(self):
+        """Regresión: un UnicodeDecodeError crudo se escapaba de los `except`
+        de los nodos (hereda de ValueError, no de OSError) y mataba el hilo."""
+        lector = LectorDeMensajes(SocketFalso([b"\xff\xfe\n"]))
+        with self.assertRaises(MensajeIlegible) as ctx:
+            lector.leer_mensaje()
+        self.assertIsInstance(ctx.exception, ErrorDeProtocolo)
+
+    def test_tras_una_linea_ilegible_se_puede_seguir_leyendo(self):
+        """La línea defectuosa debe quedar consumida: si no, quien haga
+        `continue` tras el error entraría en un bucle infinito sobre el mismo
+        buffer."""
+        lector = LectorDeMensajes(SocketFalso([b"\xff\xfe\nsigo vivo\n"]))
+        with self.assertRaises(MensajeIlegible):
+            lector.leer_mensaje()
+        self.assertEqual(lector.leer_mensaje(), "sigo vivo")
+
+    def test_todos_los_errores_de_lectura_comparten_una_base(self):
+        """Permite a los bucles supervisores atrapar la familia completa."""
+        for excepcion in (ConexionCerrada, MensajeDemasiadoLargo, MensajeIlegible):
+            self.assertTrue(issubclass(excepcion, ErrorDeProtocolo), excepcion)
+
 
 class TestRegistro(unittest.TestCase):
     def test_handler_en_memoria_respeta_la_capacidad(self):
@@ -89,6 +113,24 @@ class TestRegistro(unittest.TestCase):
             self.assertTrue(any("mensaje de prueba" in r for r in memoria.ultimos()))
             contenido = (Path(tmp) / "prueba.log").read_text(encoding="utf-8")
             self.assertIn("mensaje de prueba", contenido)
+
+    def test_reconfigurar_cierra_los_handlers_anteriores(self):
+        """Regresión: `handlers.clear()` descartaba los handlers sin cerrarlos,
+        dejando el archivo de log abierto en cada reconfiguración."""
+        with tempfile.TemporaryDirectory() as tmp:
+            logger, _ = configurar("prueba.cierre", "cierre.log", directorio=tmp)
+            previos = list(logger.handlers)
+            configurar("prueba.cierre", "cierre.log", directorio=tmp)
+
+            # Sólo los handlers de archivo: `StreamHandler.close()` no toca
+            # stderr a propósito, y cerrar la consola sería un error.
+            archivos = [h for h in previos if isinstance(h, logging.FileHandler)]
+            self.assertTrue(archivos, "debe haber un handler de archivo")
+            for handler in archivos:
+                self.assertTrue(
+                    handler.stream is None or handler.stream.closed,
+                    f"{handler} quedo abierto tras reconfigurar",
+                )
 
 
 class TestConfig(unittest.TestCase):

@@ -20,50 +20,42 @@ sequenceDiagram
 
 | Componente | Archivo | Rol |
 |---|---|---|
-| Proceso B | `servidor_b.py` | Servidor: espera pasivamente y responde el saludo |
-| Proceso A | `cliente_a.py` | Cliente: toma la iniciativa y saluda |
-| Protocolo | `../comun/protocolo.py` | Delimitación de mensajes sobre el flujo TCP |
-| Logs | `../comun/registro.py` | Registro en memoria y disco |
+| Proceso B | `servidor_b.py` | Espera pasivamente y responde el saludo |
+| Proceso A | `cliente_a.py` | Toma la iniciativa y saluda |
+| Protocolo | [`../comun/protocolo.py`](../comun/protocolo.py) | Delimitación de mensajes sobre el flujo TCP |
+| Logs | [`../comun/registro.py`](../comun/registro.py) | Registro en memoria y disco |
 
 ## Ejecución
 
 Desde la **raíz del repositorio**, en dos terminales:
 
 ```bash
-# Terminal 1 — primero el servidor
-python -m hit1.servidor_b --puerto 9001
-
-# Terminal 2 — después el cliente
-python -m hit1.cliente_a --puerto 9001 --saludo "Hola B, soy A"
+python -m hit1.servidor_b --puerto 9001                          # terminal 1
+python -m hit1.cliente_a  --puerto 9001 --saludo "Hola B, soy A" # terminal 2
 ```
 
-Salida esperada en A:
-
 ```
-INFO [hit1.cliente_a] Conectando a B en 127.0.0.1:9001
 INFO [hit1.cliente_a] Respuesta de B: Hola A, soy B. Recibi tu saludo: Hola B, soy A
 ```
 
-Parámetros: `--host` (default `127.0.0.1`), `--puerto` (default `9001`) y, en el cliente, `--saludo`.
-
-También se pueden fijar por entorno (`TP1_HOST`, `TP1_PUERTO_HIT1`, `TP1_SALUDO`) o en
-un `.env` en la raíz — ver [`.env.example`](../.env.example). Precedencia:
-línea de comandos > variable de entorno > default.
+Parámetros: `--host`, `--puerto` y, en el cliente, `--saludo`. Por entorno o `.env`:
+`TP1_HOST`, `TP1_PUERTO_HIT1`, `TP1_SALUDO`, `TP1_TIMEOUT` — ver
+[`.env.example`](../.env.example). Precedencia: CLI > entorno > default.
 
 ## Decisiones de diseño
 
-- **Delimitación de mensajes.** TCP es un flujo de bytes sin noción de mensaje: un `send` no se corresponde con un `recv`. Se delimita cada mensaje con `\n` y `LectorDeMensajes` acumula en un buffer hasta encontrarlo, de modo que un saludo partido en varios segmentos se reensambla y dos saludos que llegan juntos se separan. Es la base sobre la que el Hit #5 monta JSON.
-- **Alcance deliberadamente mínimo.** B atiende **una** conexión y termina; no hay reintentos ni tolerancia a fallos. Son exactamente las carencias que resuelven el Hit #2 (A reconecta) y el Hit #3 (B persiste).
-- **Lógica separada del `main`.** `atender_una_conexion()` y `saludar()` reciben el socket ya creado, lo que permite probarlas con puerto efímero (`puerto 0`) sin levantar procesos.
-- **`SO_REUSEADDR`.** Evita el error "Address already in use" por sockets en `TIME_WAIT` al reiniciar B durante las pruebas.
-- **UTF-8 explícito.** El protocolo fija la codificación en vez de depender del locale del sistema operativo, que varía entre las máquinas del equipo y el runner de CI.
+- **Delimitación por `\n`.** TCP es un flujo de bytes sin noción de mensaje: un `send` no se corresponde con un `recv`. `LectorDeMensajes` acumula en un buffer hasta el delimitador, así un saludo partido en varios segmentos se reensambla y dos que llegan juntos se separan. Es la base sobre la que el Hit #5 monta JSON.
+- **Alcance deliberadamente mínimo.** B atiende **una** conexión y termina; no hay reintentos. Son las carencias que resuelven el Hit #2 (A reconecta) y el Hit #3 (B persiste).
+- **Lógica separada del `main`.** `atender_una_conexion()` y `saludar()` reciben el socket ya creado, lo que permite probarlas con puerto efímero (`0`) sin levantar procesos.
+- **`SO_REUSEADDR`.** Evita "Address already in use" por sockets en `TIME_WAIT` al reiniciar B.
+- **UTF-8 explícito**, no el locale del sistema, que varía entre nuestras máquinas y el runner de CI.
+- **Si A se va antes de saludar, B termina limpio.** Sale con código 0 y lo deja en el log. Que B termine es el alcance del hit; que termine con traceback se ve como un programa roto.
 
 ## Pruebas
-
-En `tests/`, ejecutables desde la raíz del repositorio:
 
 ```bash
 python -m unittest discover -s hit1 -t . -v
 ```
 
-Cubren la construcción de la respuesta (unitaria) y el intercambio completo A↔B sobre un socket real en puerto efímero (integración).
+Construcción de la respuesta (unitaria) e intercambio completo A↔B sobre un socket
+real en puerto efímero (integración).
