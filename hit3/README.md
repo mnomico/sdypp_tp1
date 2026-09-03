@@ -15,8 +15,8 @@ graph TB
         L -->|"lanza"| H1
         L -->|"lanza"| H2
     end
-    A1["Cliente A #1"] <-->|"TCP :9003"| H1
-    A2["Cliente A #2"] <-->|"TCP :9003"| H2
+    A1["Cliente A (1)"] <-->|"TCP :9003"| H1
+    A2["Cliente A (2)"] <-->|"TCP :9003"| H2
     OP["Monitoreo"] -->|"GET /health"| HTTP
 ```
 

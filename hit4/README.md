@@ -14,12 +14,18 @@ una por sentido.**
 ```mermaid
 graph LR
     subgraph C1["Nodo C1 · escucha :9401"]
-        S1["Hilo servidor<br/>accept()"]
-        CL1["Hilo cliente<br/>saluda al par"]
+        S1["_aceptar_conexiones<br/>accept() en bucle"]
+        A1["_atender<br/>un hilo por conexion"]
+        CL1["_saludar_al_par<br/>canal saliente"]
+        H1["health :8401"]
+        S1 -->|"lanza"| A1
     end
     subgraph C2["Nodo C2 · escucha :9402"]
-        S2["Hilo servidor<br/>accept()"]
-        CL2["Hilo cliente<br/>saluda al par"]
+        S2["_aceptar_conexiones<br/>accept() en bucle"]
+        A2["_atender<br/>un hilo por conexion"]
+        CL2["_saludar_al_par<br/>canal saliente"]
+        H2["health :8402"]
+        S2 -->|"lanza"| A2
     end
     CL1 -->|"canal saliente C1→C2"| S2
     CL2 -->|"canal saliente C2→C1"| S1

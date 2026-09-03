@@ -15,9 +15,10 @@ sequenceDiagram
     Note over C1: serializar() → '{"tipo":"saludo",...}'
     C1->>C2: línea JSON + "\n"
     Note over C2: deserializar() → dict + validación
-    Note over C2: crear_respuesta("C2", saludo)
-    C2->>C1: '{"tipo":"respuesta","en_respuesta_a":"<id>",...}'
-    Note over C1: deserializar() → correlaciona por id
+    Note over C2: crear_respuesta("C2", saludo) → dict
+    Note over C2: serializar() → '{"tipo":"respuesta",...}'
+    C2->>C1: línea JSON + "\n"
+    Note over C1: deserializar() → dict + correlaciona por id
 ```
 
 La serialización vive en [`comun/mensajes.py`](../comun/mensajes.py), separada del

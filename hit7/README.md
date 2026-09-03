@@ -20,16 +20,23 @@ sequenceDiagram
 
     Note over D: Ventana 11:28–11:29<br/>Activos: [] · Siguientes: []
     C1->>D: {"tipo":"registro", "origen":"C1"}
-    Note over D: C1 va a "siguientes"<br/>Activos: [] · Siguientes: [C1]
+    Note over D: C1 va a "siguientes" · persiste el JSON<br/>Activos: [] · Siguientes: [C1]
     D-->>C1: {"nodos": []}
 
-    Note over D: 11:29:00 — ROTACIÓN<br/>siguientes → activos<br/>Activos: [C1] · Siguientes: []<br/>persiste el JSON
+    Note over D: 11:29:00 — ROTACIÓN<br/>siguientes → activos · persiste el JSON<br/>Activos: [C1] · Siguientes: []
 
     C2->>D: {"tipo":"registro", "origen":"C2"}
-    Note over D: Activos: [C1] · Siguientes: [C2]
+    Note over D: C2 va a "siguientes" · persiste el JSON<br/>Activos: [C1] · Siguientes: [C2]
     D-->>C2: {"nodos": [C1]}
     C2->>C1: {"tipo":"saludo", "origen":"C2"}
+
+    Note over C2,D: opcional, con --intervalo-consulta
+    C2->>D: {"tipo":"consulta_activos"}
+    D-->>C2: {"nodos_activos": [C1]}
 ```
+
+D responde siempre con la ventana **actual**: al registro con el campo `nodos` y a
+la consulta con `nodos_activos`. Los `siguientes` no salen nunca por el cable.
 
 ## Ejecución
 
