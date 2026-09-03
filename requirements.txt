@@ -5,6 +5,6 @@
 #
 # Instalación: pip install -r requirements.txt
 #
-# Dependencias previstas para hits posteriores (descomentar al implementarlos):
-# grpcio~=1.68          # Hit #8
-# grpcio-tools~=1.68    # Hit #8 (compilador protoc)
+# Dependencias para el Hit #8 (gRPC y Protocol Buffers):
+grpcio>=1.68.0
+grpcio-tools>=1.68.0
