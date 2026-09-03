@@ -1,11 +1,10 @@
 # Sistemas Distribuidos y Programación Paralela - TP 1
 
 **Grupo Cerberus** — Salvador Baez · Mateo Nomico · Tomás Resnik
-**Lenguaje:** Python (≥ 3.11, sólo biblioteca estándar)
+**Lenguaje:** Python (≥ 3.11)
 
-No hay dependencias externas: todo se resuelve con `socket`, `threading`, `logging`,
-`http.server` y `unittest`, así que `pip install -r requirements.txt` no instala nada
-en los Hits #1 a #7. Las primeras dependencias aparecen en el #8 (`grpcio`).
+Los Hits #1 a #7 se resuelven con la biblioteca estándar (`socket`, `threading`, `logging`,
+`http.server` y `unittest`). Para el Hit #8 se instalan las dependencias correspondientes (`grpcio` y `grpcio-tools`) con `pip install -r requirements.txt`.
 
 ## Estado de los hits
 
@@ -18,7 +17,7 @@ en los Hits #1 a #7. Las primeras dependencias aparecen en el #8 (`grpcio`).
 | [#5](hit5/) | Mensajes en formato JSON | Completo |
 | [#6](hit6/) | Nodo D como registro de contactos | Completo |
 | [#7](hit7/) | Sistema de inscripciones por ventanas de 1 min | Completo |
-| #8 | Migración a gRPC / Protobuf | Pendiente |
+| [#8](hit8/) | Migración a gRPC / Protobuf | Completo |
 
 Cada carpeta tiene su `README.md` con el diagrama de arquitectura, las instrucciones
 de ejecución y las decisiones de diseño.
@@ -37,6 +36,7 @@ comun/                  # Código compartido
 hit1/ … hit3/           # servidor_b.py + cliente_a.py + tests/ + README.md
 hit4/ … hit5/           # nodo_c.py + tests/ + README.md
 hit6/ … hit7/           # nodo_d.py + nodo_c.py + tests/ + README.md
+hit8/                   # nodo_c.py + nodo_d.py + proto/ + tests/ + README.md
 .env.example            # Plantilla de configuración (el .env real no se versiona)
 .github/workflows/ci.yml
 ```
@@ -51,12 +51,13 @@ corre sin configurar nada. Para fijar valores propios: `cp .env.example .env`.
 | `TP1_HOST` | Interfaz de escucha del servicio **y del `/health`** | `127.0.0.1` |
 | `TP1_PUERTO_HIT1` … `HIT5` | Puerto TCP de cada hit | `9001` … `9005` |
 | `TP1_PUERTO_HIT6` / `HIT7` | Puerto TCP del Nodo D de cada hit | `9600` / `9700` |
+| `TP1_PUERTO_HIT8` / `_D_HIT8` | Puerto gRPC de C / D en el Hit #8 | `9008` / `9608` |
 | `TP1_D_HOST` / `TP1_D_PUERTO` | Nodo D que usan los C del Hit #6 | `127.0.0.1` / `9600` |
 | `TP1_DURACION_VENTANA` | Ventana de inscripción del Hit #7 (s) | `60.0` |
 | `TP1_PUERTO_HEALTH` | `/health` de los nodos C | `8080` |
 | `TP1_PUERTO_HEALTH_D` / `_D_HIT7` | `/health` del Nodo D | `8086` / `8087` |
 | `TP1_SALUDO` | Mensaje que A envía a B | `Hola B, soy A` |
-| `TP1_TIMEOUT` | Timeout de socket (s) | `5.0` |
+| `TP1_TIMEOUT` | Timeout de socket / RPC (s) | `5.0` |
 | `TP1_TIMEOUT_INACTIVIDAD` | Corte de un canal entrante mudo (s) | `60.0` |
 | `TP1_ESPERA_INICIAL` / `_MAXIMA` | Backoff de reintentos (s) | `0.5` / `5.0` |
 
@@ -100,13 +101,18 @@ python -m hit7.nodo_d --puerto 9700 --puerto-health 8087
 python -m hit7.nodo_c --d-host 127.0.0.1 --d-puerto 9700 --nombre C1 --puerto-health 8081
 curl http://127.0.0.1:8087/health
 cat logs/inscripciones_hit7.json
+
+# Hit #8 — gRPC con Protocol Buffers
+python -m hit8.nodo_c --puerto 9501 --par-host 127.0.0.1 --par-puerto 9502 --nombre C1 --puerto-health 8501
+python -m hit8.nodo_c --puerto 9502 --par-host 127.0.0.1 --par-puerto 9501 --nombre C2 --sin-health
+curl http://127.0.0.1:8501/health
 ```
 
 ## Pruebas
 
 ```bash
 python -m unittest discover -s . -t . -v       # toda la suite
-python -m unittest discover -s hit3 -t . -v    # sólo un hit
+python -m unittest discover -s hit8 -t . -v    # sólo el hit 8
 python -m unittest discover -s comun -t . -v   # sólo el módulo compartido
 ```
 
@@ -117,8 +123,7 @@ archivos rotativos en `logs/` (1 MB, 3 de respaldo). `logs/` no se versiona.
 
 ## Health check
 
-Todos los servicios de larga vida —el B del Hit #3, los C de los Hits #4 a #7 y los D
-de los Hits #6 y #7— exponen `GET /health` con JSON: estado, uptime y los contadores
+Todos los servicios de larga vida exponen `GET /health` con JSON: estado, uptime y los contadores
 propios de cada rol. Es el endpoint que se usa para verificar el despliegue.
 
 Escucha en la **misma interfaz que el servicio** (`--host` / `TP1_HOST`): con el
@@ -132,11 +137,11 @@ instancias en una misma máquina hay que darle a cada una su puerto.
 `.github/workflows/ci.yml`, en cada push y PR a `main`:
 
 1. **gitleaks** — falla si detecta un secret hardcodeado.
-2. **Pruebas** — `comun` y los Hits #1 a #7 sobre Python 3.11, 3.12 y 3.13.
+2. **Pruebas** — `comun` y los Hits #1 a #8 sobre Python 3.11, 3.12 y 3.13.
 3. **Prueba de humo** — levanta los procesos de verdad: A saluda a B; se mata a A con
    `kill -9` y B sigue respondiendo el health; dos C se saludan mutuamente; los
-   mensajes viajan en JSON; tres C se descubren a través de D; y las inscripciones del
-   Hit #7 quedan persistidas en disco.
+   mensajes viajan en JSON; tres C se descubren a través de D; las inscripciones del
+   Hit #7 quedan persistidas en disco; y los nodos del Hit #8 se comunican vía gRPC.
 
 ## Seguridad
 
