@@ -1,10 +1,13 @@
 # Sistemas Distribuidos y Programación Paralela - TP 1
 
 **Grupo Cerberus** — Salvador Baez · Mateo Nomico · Tomás Resnik
+
 **Lenguaje:** Python (≥ 3.11)
 
 Los Hits #1 a #7 se resuelven con la biblioteca estándar (`socket`, `threading`, `logging`,
-`http.server` y `unittest`). Para el Hit #8 se instalan las dependencias correspondientes (`grpcio` y `grpcio-tools`) con `pip install -r requirements.txt`.
+`http.server` y `unittest`). 
+
+Para el Hit #8 se instalan las dependencias correspondientes (`grpcio` y `grpcio-tools`) con `pip install -r requirements.txt`.
 
 ## Estado de los hits
 
