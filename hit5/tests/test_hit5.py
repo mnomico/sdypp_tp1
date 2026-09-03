@@ -139,6 +139,43 @@ class TestNodoCJson(unittest.TestCase):
         self.assertEqual(respuesta["en_respuesta_a"], saludo["id"])
         self.assertEqual(nodo.estado()["estado"], "ok")
 
+    def test_bytes_ilegibles_se_cuentan_y_no_cortan_el_canal(self):
+        """Regresión: el README promete que un mensaje mal formado se descarta
+        sin cortar el canal, pero con bytes que no son UTF-8 el hilo moría con
+        un traceback fuera del log y la conexión se caía."""
+        nodo = self._crear("C-servidor")
+        nodo.iniciar(espera_inicial=0.01)
+
+        with socket.create_connection(("127.0.0.1", nodo.puerto), timeout=5) as sock:
+            sock.sendall(b"\xff\xfe\xfa\n")
+            self.assertTrue(self._esperar(lambda: nodo.estado()["mensajes_invalidos"] >= 1))
+
+            saludo = mensajes.crear_saludo("C-cliente")
+            enviar_mensaje(sock, mensajes.serializar(saludo))
+            respuesta = mensajes.deserializar(LectorDeMensajes(sock).leer_mensaje())
+
+        self.assertEqual(respuesta["en_respuesta_a"], saludo["id"])
+        self.assertEqual(nodo.estado()["estado"], "ok")
+
+    def test_solo_responde_a_los_mensajes_de_tipo_saludo(self):
+        """El protocolo tiene mas de un tipo: contestar a todo con una
+        respuesta contaba respuestas ajenas como saludos en el /health."""
+        nodo = self._crear("C-servidor")
+        nodo.iniciar(espera_inicial=0.01)
+
+        ajeno = mensajes.crear_respuesta("C-otro", mensajes.crear_saludo("C-tercero"))
+        with socket.create_connection(("127.0.0.1", nodo.puerto), timeout=5) as sock:
+            enviar_mensaje(sock, mensajes.serializar(ajeno))
+            self.assertTrue(self._esperar(lambda: nodo.estado()["mensajes_ignorados"] >= 1))
+
+            # El canal sigue abierto y un saludo de verdad se responde igual.
+            saludo = mensajes.crear_saludo("C-cliente")
+            enviar_mensaje(sock, mensajes.serializar(saludo))
+            respuesta = mensajes.deserializar(LectorDeMensajes(sock).leer_mensaje())
+
+        self.assertEqual(respuesta["en_respuesta_a"], saludo["id"])
+        self.assertEqual(nodo.estado()["saludos_recibidos"], 1, "solo cuenta saludos reales")
+
     def test_varios_mensajes_en_un_mismo_segmento(self):
         """Dos JSON pegados en un solo send se separan por el delimitador."""
         nodo = self._crear("C-servidor")

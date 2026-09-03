@@ -5,8 +5,7 @@
 
 ## Arquitectura
 
-Mismo nodo bidireccional del Hit #4; lo que cambia es **qué** viaja por los canales.
-El texto plano pasa a ser un objeto JSON con estructura explícita.
+Mismo nodo bidireccional del Hit #4; cambia **qué** viaja por los canales.
 
 ```mermaid
 sequenceDiagram
@@ -22,7 +21,7 @@ sequenceDiagram
 ```
 
 La serialización vive en [`comun/mensajes.py`](../comun/mensajes.py), separada del
-transporte (`comun/protocolo.py`), que sigue ocupándose sólo de delimitar.
+transporte ([`comun/protocolo.py`](../comun/protocolo.py)), que sólo delimita.
 
 ### Formato
 
@@ -39,7 +38,7 @@ transporte (`comun/protocolo.py`), que sigue ocupándose sólo de delimitar.
 |---|---|
 | `version` | Permite evolucionar el protocolo sin romper nodos viejos |
 | `id` | Identificador único del mensaje (UUID4) |
-| `tipo` | `saludo` o `respuesta`; el receptor no tiene que adivinar |
+| `tipo` | En este hit, `saludo` o `respuesta`. El módulo define además los tipos de registro y consulta que usan los Hits #6 y #7 |
 | `origen` | Quién lo envía, sin recortar cadenas de texto |
 | `contenido` | El saludo legible |
 | `en_respuesta_a` | Correlaciona la respuesta con su saludo |
@@ -48,11 +47,8 @@ transporte (`comun/protocolo.py`), que sigue ocupándose sólo de delimitar.
 ## Ejecución
 
 ```bash
-# Terminal 1
 python -m hit5.nodo_c --puerto 9501 --par-host 127.0.0.1 --par-puerto 9502 \
                       --nombre C1 --puerto-health 8501
-
-# Terminal 2
 python -m hit5.nodo_c --puerto 9502 --par-host 127.0.0.1 --par-puerto 9501 \
                       --nombre C2 --sin-health
 ```
@@ -76,51 +72,29 @@ print(LectorDeMensajes(s).leer_mensaje())
 "
 ```
 
-Mismos parámetros que el Hit #4 (`TP1_PUERTO_HIT5` por entorno).
+Mismos parámetros que el Hit #4 (`TP1_PUERTO_HIT5` por entorno). El `/health` agrega
+`formato_mensajes`, `mensajes_invalidos` (JSON mal formado o bytes ilegibles) y
+`mensajes_ignorados` (mensajes válidos de un tipo que este nodo no responde).
 
 ## Decisiones de diseño
 
-- **JSON Lines: un objeto por línea.** Se conserva el delimitador `\n` del Hit #1 en
-  vez de inventar un framing nuevo. Es seguro porque `json.dumps` escapa los saltos
-  de línea del contenido como `\\n` y nunca emite uno literal — hay un test que lo
-  fija. La alternativa (prefijo de longitud) sería más eficiente pero ilegible al
-  depurar con `tcpdump` o `nc`.
-- **Serialización separada del transporte.** `comun/mensajes.py` no conoce sockets y
-  `comun/protocolo.py` no conoce JSON. Por eso las pruebas del formato son unitarias
-  y puras, y el Hit #8 podrá reemplazar la serialización por Protobuf sin tocar el
-  framing.
-- **Validar al deserializar, no confiar.** `deserializar()` verifica que sea JSON
-  válido, que sea un objeto y que tenga `tipo`, `origen` y `contenido`. Un mensaje
-  mal formado lanza `MensajeInvalido`, se cuenta en el `/health` y **se descarta sin
-  cortar el canal**: en un sistema distribuido el emisor puede ser un nodo viejo o
-  defectuoso, y eso no debe voltear al receptor.
-- **`ensure_ascii=False` + UTF-8.** Mantiene los acentos legibles en el cable en vez
-  de inflarlos a `\uXXXX`, que además ocuparía el triple de bytes.
-- **`separators=(",", ":")`.** Sin espacios superfluos: son bytes que se pagan en
-  cada mensaje y no aportan nada.
-- **`id` y `en_respuesta_a`.** Correlacionar respuestas con solicitudes es lo que
-  vuelve posible tener varias en vuelo por el mismo canal, en lugar de asumir que la
-  siguiente respuesta corresponde al último saludo enviado.
-- **`version` desde el inicio.** Agregarlo después obliga a soportar mensajes sin él.
-- **La ganancia concreta sobre el Hit #4.** Antes la respuesta se armaba pegando
-  texto (`"Recibi tu saludo: " + saludo`); ahora se lee `saludo["origen"]` y se
-  responde *"Hola C1, soy C2"*. El receptor entiende **campos**, no una cadena que
-  habría que parsear.
-- **`tamano_en_bytes()`.** Deja medido el costo del formato para la comparación
-  JSON vs Protobuf que pide el Hit #8 (este saludo: 161 bytes).
+- **JSON Lines: un objeto por línea.** Se conserva el delimitador `\n` del Hit #1 en vez de inventar un framing nuevo. Es seguro porque `json.dumps` escapa los saltos de línea del contenido y nunca emite uno literal — hay un test que lo fija. La alternativa (prefijo de longitud) sería más eficiente pero ilegible al depurar con `tcpdump` o `nc`.
+- **Serialización separada del transporte.** `mensajes.py` no conoce sockets y `protocolo.py` no conoce JSON: las pruebas del formato son unitarias y puras, y el Hit #8 podrá reemplazar la serialización por Protobuf sin tocar el framing.
+- **Validar al deserializar, no confiar.** Se verifica que sea JSON válido, que sea un objeto y que tenga `tipo`, `origen` y `contenido`. Lo que no pasa se cuenta en el `/health` y **se descarta sin cortar el canal**: el emisor puede ser un nodo viejo o defectuoso, y eso no debe voltear al receptor.
+- **Los bytes ilegibles cuentan como mensaje inválido.** Antes, una línea que no era UTF-8 levantaba un `UnicodeDecodeError` que hereda de `ValueError` y por lo tanto se escapaba de todos los `except`: mataba el hilo con un traceback fuera del log y cortaba el canal, justo lo contrario de lo que promete el punto anterior. Ahora el lector lo traduce a `MensajeIlegible` y se trata como cualquier otro mensaje mal formado.
+- **Sólo se responden los mensajes de tipo `saludo`.** Con más de un tipo en el protocolo, contestar a todo hacía que una `respuesta` ajena se contara como saludo recibido y falseaba las métricas.
+- **`ensure_ascii=False` + UTF-8:** mantiene los acentos legibles en el cable en vez de inflarlos a `\uXXXX`, que además ocuparía el triple de bytes.
+- **`separators=(",", ":")`:** sin espacios superfluos, que son bytes que se pagan en cada mensaje.
+- **`id` y `en_respuesta_a`:** correlacionar respuestas con solicitudes es lo que permite tener varias en vuelo por el mismo canal, en vez de asumir que la siguiente respuesta corresponde al último saludo.
+- **`version` desde el inicio:** agregarlo después obliga a soportar mensajes sin él.
+- **La ganancia sobre el Hit #4.** Antes la respuesta se armaba pegando texto (`"Recibi tu saludo: " + saludo`); ahora se lee `saludo["origen"]`. El receptor entiende **campos**, no una cadena que habría que parsear.
+- **`tamano_en_bytes()`** deja medido el costo del formato para la comparación JSON vs Protobuf del Hit #8 (este saludo: 161 bytes).
 
 ## Pruebas
-
-En `tests/`, ejecutables desde la raíz del repositorio:
 
 ```bash
 python -m unittest discover -s hit5 -t . -v
 ```
 
-- **Unitarias del formato:** campos obligatorios, unicidad de `id`, correlación por
-  `en_respuesta_a`, ida y vuelta sin pérdida, una sola línea aun con saltos en el
-  contenido, acentos sin escapar, y rechazo de JSON mal formado / que no es objeto /
-  sin campos obligatorios.
-- **Integración:** dos nodos se saludan en JSON; se inspecciona el **JSON crudo del
-  socket**, no sólo el resultado; un mensaje inválido no tumba el nodo y el canal
-  sigue sirviendo; dos mensajes pegados en un mismo segmento TCP se separan bien.
+- **Formato (unitarias):** campos obligatorios, unicidad de `id`, correlación por `en_respuesta_a`, ida y vuelta sin pérdida, una sola línea aun con saltos en el contenido, acentos sin escapar, rechazo de JSON mal formado / que no es objeto / sin campos obligatorios.
+- **Integración:** dos nodos se saludan en JSON · se inspecciona el **JSON crudo del socket** · un mensaje inválido no tumba el nodo · **bytes ilegibles se cuentan y el canal sigue vivo** · **sólo se responde a los `saludo`** · dos mensajes pegados en un mismo segmento TCP se separan bien.

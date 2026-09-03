@@ -3,6 +3,7 @@
 import json
 import logging
 import socket
+import threading
 import time
 import unittest
 import urllib.request
@@ -117,6 +118,68 @@ class TestNodoC(unittest.TestCase):
         with socket.create_connection(("127.0.0.1", uno.puerto), timeout=5) as sock:
             enviar_mensaje(sock, "saludo de un tercero")
             self.assertIn("saludo de un tercero", LectorDeMensajes(sock).leer_mensaje())
+
+    def test_el_canal_saliente_sobrevive_a_basura_del_par(self):
+        """Regresión: bytes ilegibles del par mataban el hilo del canal
+        saliente y el nodo quedaba sin reconexión, mientras `/health` seguía
+        informando `canal_saliente: conectado`."""
+        escucha = socket.socket()
+        escucha.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        escucha.bind(("127.0.0.1", 0))
+        escucha.listen(8)
+        self.addCleanup(escucha.close)
+        conexiones = []
+
+        def par_que_manda_basura():
+            """Contesta bytes no decodificables y despues se porta bien."""
+            while True:
+                try:
+                    conexion, _ = escucha.accept()
+                except OSError:
+                    return
+                intento = len(conexiones)
+                conexiones.append(conexion)
+                try:
+                    LectorDeMensajes(conexion).leer_mensaje()
+                    if intento == 0:
+                        conexion.sendall(b"\xff\xfe\n")
+                    else:
+                        enviar_mensaje(conexion, "respuesta valida")
+                except OSError:
+                    return
+
+        threading.Thread(target=par_que_manda_basura, daemon=True).start()
+
+        nodo = self._crear("C-victima")
+        nodo.configurar_par("127.0.0.1", escucha.getsockname()[1])
+        nodo.iniciar(espera_inicial=0.01, espera_maxima=0.05)
+
+        self.assertTrue(
+            self._esperar(lambda: nodo.estado()["respuestas_recibidas"] >= 1),
+            "el canal saliente debe reconectar despues de recibir basura",
+        )
+        self.assertGreaterEqual(len(conexiones), 2, "debe haber reintentado")
+        self.assertEqual(nodo.estado()["canal_saliente"], "conectado")
+
+    def test_no_acumula_un_hilo_por_conexion_para_siempre(self):
+        """Regresión: `_hilos` guardaba un Thread por conexión atendida y nunca
+        los descartaba, con el nodo pensado para quedarse corriendo."""
+        nodo = self._crear("C-carga")
+        nodo.iniciar(espera_inicial=0.01)
+
+        for _ in range(40):
+            socket.create_connection(("127.0.0.1", nodo.puerto), timeout=5).close()
+
+        self.assertTrue(
+            self._esperar(lambda: nodo.estado()["conexiones_atendidas"] >= 40)
+        )
+        self.assertTrue(self._esperar(lambda: nodo.estado()["conexiones_activas"] == 0))
+        # Una conexion mas dispara la poda de los hilos ya terminados.
+        socket.create_connection(("127.0.0.1", nodo.puerto), timeout=5).close()
+        self.assertTrue(
+            self._esperar(lambda: len(nodo._hilos) < 10),
+            f"quedaron {len(nodo._hilos)} hilos retenidos de 41 conexiones",
+        )
 
     def test_health_expone_ambos_lados(self):
         uno, dos = self._par_de_nodos()

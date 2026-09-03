@@ -19,11 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from comun import config, mensajes
-from comun.health import iniciar_health
+from comun.health import iniciar_health_opcional
 from comun.protocolo import (
     ConexionCerrada,
     LectorDeMensajes,
     MensajeDemasiadoLargo,
+    MensajeIlegible,
     enviar_mensaje,
 )
 from comun.registro import configurar
@@ -32,6 +33,7 @@ HOST_POR_DEFECTO = config.texto("TP1_HOST", "127.0.0.1")
 PUERTO_POR_DEFECTO = config.entero("TP1_PUERTO_HIT7", 9700)
 PUERTO_HEALTH_POR_DEFECTO = config.entero("TP1_PUERTO_HEALTH_D_HIT7", 8087)
 DURACION_VENTANA_POR_DEFECTO = config.decimal("TP1_DURACION_VENTANA", 60.0)
+TIMEOUT_INACTIVIDAD = config.decimal("TP1_TIMEOUT_INACTIVIDAD", 60.0)
 ARCHIVO_INSCRIPCIONES_DEFECTO = (
     Path(__file__).resolve().parent.parent / "logs" / "inscripciones_hit7.json"
 )
@@ -56,6 +58,7 @@ class NodoD:
         backlog=CONEXIONES_EN_ESPERA,
     ):
         self._logger = logger
+        self._timeout_inactividad = TIMEOUT_INACTIVIDAD
         self.nombre = nombre
         self.duracion_ventana = float(duracion_ventana)
         self.archivo_inscripciones = Path(archivo_inscripciones)
@@ -175,6 +178,7 @@ class NodoD:
             self._conexiones_atendidas += 1
         try:
             with conexion:
+                conexion.settimeout(self._timeout_inactividad)
                 lector = LectorDeMensajes(conexion)
                 crudo = lector.leer_mensaje()
                 try:
@@ -245,12 +249,35 @@ class NodoD:
 
         except ConexionCerrada:
             self._logger.info("[servidor] %s:%s cerro la conexion", *direccion)
+        except MensajeIlegible as error:
+            # Bytes que no son UTF-8: se descarta la peticion, no se cae el hilo.
+            with self._lock:
+                self._mensajes_invalidos += 1
+            self._logger.warning("[servidor] mensaje ilegible de %s:%s: %s", *direccion, error)
+        except TimeoutError:
+            self._logger.info(
+                "[servidor] %s:%s sin actividad por %.0fs; se cierra el canal",
+                *direccion, self._timeout_inactividad,
+            )
         except (MensajeDemasiadoLargo, OSError) as error:
             self._logger.warning("[servidor] error con %s:%s: %s", *direccion, error)
+        except Exception:
+            self._logger.exception("[servidor] error inesperado con %s:%s", *direccion)
         finally:
             with self._lock:
                 self._conexiones.discard(conexion)
                 self._conexiones_activas -= 1
+
+    def _registrar_hilo(self, hilo):
+        """Anota el hilo y descarta los ya terminados.
+
+        Sin la poda, `_hilos` acumula un objeto Thread por cada conexion
+        atendida durante toda la vida del nodo: una fuga de memoria silenciosa
+        en un proceso que esta pensado para quedarse corriendo.
+        """
+        with self._lock:
+            self._hilos = [h for h in self._hilos if h.is_alive()]
+            self._hilos.append(hilo)
 
     def _aceptar_conexiones(self):
         self._logger.info("%s escuchando en %s:%s", self.nombre, self.host, self.puerto)
@@ -266,18 +293,18 @@ class NodoD:
                 target=self._atender_conexion, args=(conexion, direccion), daemon=True
             )
             hilo.start()
-            self._hilos.append(hilo)
+            self._registrar_hilo(hilo)
 
     # --------------------------------------------------------------- ciclo vida
 
     def iniciar(self):
         servidor = threading.Thread(target=self._aceptar_conexiones, daemon=True)
         servidor.start()
-        self._hilos.append(servidor)
+        self._registrar_hilo(servidor)
 
         rotador = threading.Thread(target=self._loop_rotacion_ventanas, daemon=True)
         rotador.start()
-        self._hilos.append(rotador)
+        self._registrar_hilo(rotador)
 
     def detener(self):
         self._detenido.set()
@@ -325,8 +352,7 @@ def main(argv=None):
     )
 
     if not args.sin_health:
-        iniciar_health(args.puerto_health, nodo.estado)
-        logger.info("Health disponible en http://%s:%s/health", args.host, args.puerto_health)
+        iniciar_health_opcional(args.puerto_health, nodo.estado, args.host, logger)
 
     nodo.iniciar()
     try:

@@ -1,4 +1,4 @@
-# Los Hits #1 a #3 no requieren dependencias externas: se resuelven con la
+# Los Hits #1 a #7 no requieren dependencias externas: se resuelven con la
 # biblioteca estándar de Python 3.11+ (socket, threading, logging, http.server,
 # unittest). La configuración se lee de variables de entorno / .env con un
 # lector propio (comun/config.py), sin python-dotenv.

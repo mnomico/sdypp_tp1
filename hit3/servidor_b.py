@@ -12,11 +12,12 @@ import threading
 import time
 
 from comun import config
-from comun.health import iniciar_health
+from comun.health import iniciar_health_opcional
 from comun.protocolo import (
     ConexionCerrada,
     LectorDeMensajes,
     MensajeDemasiadoLargo,
+    MensajeIlegible,
     enviar_mensaje,
 )
 from comun.registro import configurar
@@ -24,6 +25,7 @@ from comun.registro import configurar
 HOST_POR_DEFECTO = config.texto("TP1_HOST", "127.0.0.1")
 PUERTO_POR_DEFECTO = config.entero("TP1_PUERTO_HIT3", 9003)
 PUERTO_HEALTH_POR_DEFECTO = config.entero("TP1_PUERTO_HEALTH", 8080)
+TIMEOUT_INACTIVIDAD = config.decimal("TP1_TIMEOUT_INACTIVIDAD", 60.0)
 CONEXIONES_EN_ESPERA = 16
 
 
@@ -32,8 +34,16 @@ def construir_respuesta(saludo):
 
 
 class ServidorB:
-    def __init__(self, host, puerto, logger, backlog=CONEXIONES_EN_ESPERA):
+    def __init__(
+        self,
+        host,
+        puerto,
+        logger,
+        backlog=CONEXIONES_EN_ESPERA,
+        timeout_inactividad=TIMEOUT_INACTIVIDAD,
+    ):
         self._logger = logger
+        self._timeout_inactividad = timeout_inactividad
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._socket.bind((host, puerto))
@@ -46,6 +56,7 @@ class ServidorB:
         self._conexiones_activas = 0
         self._conexiones_atendidas = 0
         self._saludos_recibidos = 0
+        self._mensajes_ilegibles = 0
 
     def estado(self):
         with self._lock:
@@ -57,6 +68,7 @@ class ServidorB:
                 "conexiones_activas": self._conexiones_activas,
                 "conexiones_atendidas": self._conexiones_atendidas,
                 "saludos_recibidos": self._saludos_recibidos,
+                "mensajes_ilegibles": self._mensajes_ilegibles,
             }
 
     def _atender(self, conexion, direccion):
@@ -65,18 +77,41 @@ class ServidorB:
             self._conexiones_atendidas += 1
         try:
             with conexion:
+                # Sin timeout, un cliente que conecta y no habla retiene un hilo
+                # para siempre: con backlog acotado eso alcanza para dejar al
+                # servidor sin capacidad de atender a nadie mas.
+                conexion.settimeout(self._timeout_inactividad)
                 lector = LectorDeMensajes(conexion)
                 while not self._detenido.is_set():
-                    saludo = lector.leer_mensaje()
+                    try:
+                        saludo = lector.leer_mensaje()
+                    except MensajeIlegible as error:
+                        # Bytes que no son UTF-8 no deben cortar el canal ni,
+                        # mucho menos, matar el hilo: se descarta esa linea.
+                        with self._lock:
+                            self._mensajes_ilegibles += 1
+                        self._logger.warning(
+                            "Mensaje ilegible de %s:%s descartado: %s", *direccion, error
+                        )
+                        continue
                     with self._lock:
                         self._saludos_recibidos += 1
                     self._logger.info("Saludo de %s:%s: %s", *direccion, saludo)
                     enviar_mensaje(conexion, construir_respuesta(saludo))
         except ConexionCerrada:
             self._logger.info("Cliente %s:%s cerro la conexion", *direccion)
+        except TimeoutError:
+            self._logger.info(
+                "Cliente %s:%s sin actividad por %.0fs; se cierra el canal",
+                *direccion, self._timeout_inactividad,
+            )
         except (MensajeDemasiadoLargo, OSError) as error:
             # Aislar el fallo en este hilo es lo que mantiene vivo al servidor.
             self._logger.warning("Error con %s:%s: %s", *direccion, error)
+        except Exception:
+            # Red de ultimo recurso: ninguna excepcion inesperada de un cliente
+            # puede escaparse del hilo, o muere sin quedar registrada en el log.
+            self._logger.exception("Error inesperado con %s:%s", *direccion)
         finally:
             with self._lock:
                 self._conexiones_activas -= 1
@@ -119,8 +154,7 @@ def main(argv=None):
     servidor = ServidorB(args.host, args.puerto, logger)
 
     if not args.sin_health:
-        iniciar_health(args.puerto_health, servidor.estado)
-        logger.info("Health disponible en http://%s:%s/health", args.host, args.puerto_health)
+        iniciar_health_opcional(args.puerto_health, servidor.estado, args.host, logger)
 
     try:
         servidor.servir_para_siempre()

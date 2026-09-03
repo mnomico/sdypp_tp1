@@ -12,11 +12,12 @@ import threading
 import time
 
 from comun import config, mensajes
-from comun.health import iniciar_health
+from comun.health import iniciar_health_opcional
 from comun.protocolo import (
     ConexionCerrada,
     LectorDeMensajes,
     MensajeDemasiadoLargo,
+    MensajeIlegible,
     enviar_mensaje,
 )
 from comun.registro import configurar
@@ -24,6 +25,7 @@ from comun.registro import configurar
 HOST_POR_DEFECTO = config.texto("TP1_HOST", "127.0.0.1")
 PUERTO_POR_DEFECTO = config.entero("TP1_PUERTO_HIT6", 9600)
 PUERTO_HEALTH_POR_DEFECTO = config.entero("TP1_PUERTO_HEALTH_D", 8086)
+TIMEOUT_INACTIVIDAD = config.decimal("TP1_TIMEOUT_INACTIVIDAD", 60.0)
 CONEXIONES_EN_ESPERA = 16
 
 
@@ -32,6 +34,7 @@ class NodoD:
 
     def __init__(self, host, puerto, logger, nombre="NodoD", backlog=CONEXIONES_EN_ESPERA):
         self._logger = logger
+        self._timeout_inactividad = TIMEOUT_INACTIVIDAD
         self.nombre = nombre
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -84,6 +87,7 @@ class NodoD:
             self._conexiones_atendidas += 1
         try:
             with conexion:
+                conexion.settimeout(self._timeout_inactividad)
                 lector = LectorDeMensajes(conexion)
                 crudo = lector.leer_mensaje()
                 try:
@@ -148,12 +152,35 @@ class NodoD:
 
         except ConexionCerrada:
             self._logger.info("[registro] %s:%s cerro la conexion", *direccion)
+        except MensajeIlegible as error:
+            # Bytes que no son UTF-8: se descarta la peticion, no se cae el hilo.
+            with self._lock:
+                self._mensajes_invalidos += 1
+            self._logger.warning("[registro] mensaje ilegible de %s:%s: %s", *direccion, error)
+        except TimeoutError:
+            self._logger.info(
+                "[registro] %s:%s sin actividad por %.0fs; se cierra el canal",
+                *direccion, self._timeout_inactividad,
+            )
         except (MensajeDemasiadoLargo, OSError) as error:
             self._logger.warning("[registro] error con %s:%s: %s", *direccion, error)
+        except Exception:
+            self._logger.exception("[registro] error inesperado con %s:%s", *direccion)
         finally:
             with self._lock:
                 self._conexiones.discard(conexion)
                 self._conexiones_activas -= 1
+
+    def _registrar_hilo(self, hilo):
+        """Anota el hilo y descarta los ya terminados.
+
+        Sin la poda, `_hilos` acumula un objeto Thread por cada conexion
+        atendida durante toda la vida del nodo: una fuga de memoria silenciosa
+        en un proceso que esta pensado para quedarse corriendo.
+        """
+        with self._lock:
+            self._hilos = [h for h in self._hilos if h.is_alive()]
+            self._hilos.append(hilo)
 
     def _aceptar_conexiones(self):
         self._logger.info("%s escuchando registros en %s:%s", self.nombre, self.host, self.puerto)
@@ -169,14 +196,14 @@ class NodoD:
                 target=self._atender_registro, args=(conexion, direccion), daemon=True
             )
             hilo.start()
-            self._hilos.append(hilo)
+            self._registrar_hilo(hilo)
 
     # --------------------------------------------------------------- ciclo vida
 
     def iniciar(self):
         servidor = threading.Thread(target=self._aceptar_conexiones, daemon=True)
         servidor.start()
-        self._hilos.append(servidor)
+        self._registrar_hilo(servidor)
 
     def detener(self):
         self._detenido.set()
@@ -213,8 +240,7 @@ def main(argv=None):
     nodo = NodoD(args.host, args.puerto, logger, args.nombre)
 
     if not args.sin_health:
-        iniciar_health(args.puerto_health, nodo.estado)
-        logger.info("Health disponible en http://%s:%s/health", args.host, args.puerto_health)
+        iniciar_health_opcional(args.puerto_health, nodo.estado, args.host, logger)
 
     nodo.iniciar()
     try:

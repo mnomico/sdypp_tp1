@@ -65,6 +65,39 @@ class TestIntegracionHit3(unittest.TestCase):
         enviar_mensaje(primero, "cliente uno otra vez")
         self.assertIn("cliente uno otra vez", LectorDeMensajes(primero).leer_mensaje())
 
+    def test_bytes_ilegibles_no_cortan_el_canal_ni_matan_el_hilo(self):
+        """Regresión: el UnicodeDecodeError se escapaba de los `except` del
+        hilo de atención (hereda de ValueError, no de OSError), lo mataba con
+        un traceback fuera del log y cortaba la conexión."""
+        with socket.create_connection(("127.0.0.1", self.puerto), timeout=5) as sock:
+            sock.sendall(b"\xff\xfe\xfa\n")
+            self.assertTrue(
+                self._esperar(lambda: self.servidor.estado()["mensajes_ilegibles"] >= 1)
+            )
+            # El canal sigue sirviendo despues de la basura.
+            enviar_mensaje(sock, "sigo hablando")
+            self.assertIn("sigo hablando", LectorDeMensajes(sock).leer_mensaje())
+
+        self.assertEqual(self.servidor.estado()["estado"], "ok")
+
+    def test_un_cliente_mudo_no_retiene_el_hilo_para_siempre(self):
+        """Sin timeout de inactividad, un cliente que conecta y calla ocupa un
+        hilo indefinidamente y agota la capacidad del servidor."""
+        servidor = servidor_b.ServidorB(
+            "127.0.0.1", 0, self.logger, timeout_inactividad=0.3
+        )
+        servidor.iniciar_en_hilo()
+        self.addCleanup(servidor.detener)
+
+        mudo = socket.create_connection(("127.0.0.1", servidor.puerto), timeout=5)
+        self.addCleanup(mudo.close)
+        self.assertTrue(self._esperar(lambda: servidor.estado()["conexiones_activas"] == 1))
+        self.assertTrue(
+            self._esperar(lambda: servidor.estado()["conexiones_activas"] == 0),
+            "el canal inactivo debe cerrarse solo",
+        )
+        self.assertEqual(servidor.estado()["estado"], "ok")
+
     def test_health_refleja_el_estado_del_servidor(self):
         http = iniciar_health(0, self.servidor.estado, host="127.0.0.1")
         self.addCleanup(http.server_close)
