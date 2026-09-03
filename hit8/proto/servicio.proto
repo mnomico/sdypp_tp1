@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package sdypp.hit8;
+
+// Servicio de comunicación entre nodos C (saludo bidireccional)
+service MensajeriaC {
+    // Envía un saludo a un nodo C y recibe la respuesta estructurada
+    rpc Saludar (MensajeSaludo) returns (MensajeRespuesta);
+}
+
+// Servicio de directorio/registro del Nodo D (Registro y Consulta de nodos)
+service RegistroD {
+    // Un nodo C se registra ante D indicando su IP y puerto gRPC, y recibe la lista de otros nodos C
+    rpc Registrar (RegistroSolicitud) returns (RegistroRespuesta);
+
+    // Consulta los nodos C activos en el sistema
+    rpc ConsultarActivos (ConsultaActivosSolicitud) returns (ConsultaActivosRespuesta);
+}
+
+// ====================================================================
+// Mensajes entre nodos C (Hit 5 / Hit 8)
+// ====================================================================
+
+message MensajeSaludo {
+    int32 version = 1;
+    string id = 2;
+    string tipo = 3;
+    string origen = 4;
+    string contenido = 5;
+    string timestamp = 6;
+}
+
+message MensajeRespuesta {
+    int32 version = 1;
+    string id = 2;
+    string tipo = 3;
+    string origen = 4;
+    string contenido = 5;
+    string en_respuesta_a = 6;
+    string timestamp = 7;
+}
+
+// ====================================================================
+// Mensajes de registro y coordinación con nodo D (Hit 6 / Hit 7 / Hit 8)
+// ====================================================================
+
+message InfoNodo {
+    string ip = 1;
+    int32 puerto = 2;
+    string nombre = 3;
+}
+
+message RegistroSolicitud {
+    int32 version = 1;
+    string id = 2;
+    string tipo = 3;
+    string origen = 4;
+    string contenido = 5;
+    string ip = 6;
+    int32 puerto = 7;
+    string timestamp = 8;
+}
+
+message RegistroRespuesta {
+    int32 version = 1;
+    string id = 2;
+    string tipo = 3;
+    string origen = 4;
+    string contenido = 5;
+    string en_respuesta_a = 6;
+    repeated InfoNodo nodos = 7;
+    string timestamp = 8;
+}
+
+message ConsultaActivosSolicitud {
+    int32 version = 1;
+    string id = 2;
+    string tipo = 3;
+    string origen = 4;
+    string contenido = 5;
+    string timestamp = 6;
+}
+
+message ConsultaActivosRespuesta {
+    int32 version = 1;
+    string id = 2;
+    string tipo = 3;
+    string origen = 4;
+    string contenido = 5;
+    string en_respuesta_a = 6;
+    repeated InfoNodo nodos_activos = 7;
+    string timestamp = 8;
+}
