@@ -154,3 +154,6 @@ instancias en una misma máquina hay que darle a cada una su puerto.
 - Las credenciales de despliegue se gestionan con GitHub Secrets y OIDC contra el
   proveedor de nube, sin claves estáticas en el repositorio.
 - `gitleaks` corre en cada push y hace fallar el pipeline si detecta un secret.
+
+## IA Utilizada
+Claude y Geminis
