@@ -3,6 +3,10 @@
 > Modifique el código de B para que si el proceso A cierra la conexión
 > (por ejemplo matando el proceso) siga funcionando.
 
+## Demo
+
+https://github.com/user-attachments/assets/763843e2-4740-43c4-ad1f-7d8f4cab82ae
+
 ## Arquitectura
 
 ```mermaid
