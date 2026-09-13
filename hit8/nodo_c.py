@@ -76,6 +76,7 @@ class NodoC:
         self._pares_registrados = []
 
         self._canal_saliente = "sin_par"
+        self._canal_grpc_saliente = None
         self._saludos_recibidos = 0
         self._saludos_enviados = 0
         self._respuestas_recibidas = 0
@@ -203,28 +204,95 @@ class NodoC:
             )
             return respuesta
 
-    def _saludar_al_par_continuo(self, espera_inicial, espera_maxima, timeout):
-        """Bucle de saludo y supervisión continuo para topología de par fijo (Hit #5)."""
+    def _saludar_al_par(self, espera_inicial, espera_maxima, timeout):
+        """Abre canal gRPC con el par, envía el saludo una vez y supervisa la conexión."""
         host, puerto = self.par
         espera = espera_inicial
 
         while not self._detenido.is_set():
+            canal = None
             try:
-                self.enviar_saludo_rpc(host, puerto, timeout=timeout)
+                canal = grpc.insecure_channel(f"{host}:{puerto}")
                 with self._lock:
+                    self._canal_grpc_saliente = canal
+
+                stub = servicio_pb2_grpc.MensajeriaCStub(canal)
+
+                saludo = servicio_pb2.MensajeSaludo(
+                    version=VERSION_PROTOCOLO,
+                    id=str(uuid.uuid4()),
+                    tipo="saludo",
+                    origen=self.nombre,
+                    contenido=f"Hola, soy {self.nombre}",
+                    timestamp=_ahora(),
+                )
+                tamano_bytes = saludo.ByteSize()
+
+                # Enviar saludo RPC al par
+                respuesta = stub.Saludar(saludo, timeout=timeout)
+
+                with self._lock:
+                    self._saludos_enviados += 1
+                    self._respuestas_recibidas += 1
                     self._canal_saliente = "conectado"
+
+                self._logger.info(
+                    "[saliente] saludo gRPC enviado a %s:%s (id=%s, %s bytes): %s",
+                    host,
+                    puerto,
+                    saludo.id,
+                    tamano_bytes,
+                    saludo.contenido,
+                )
+                self._logger.info(
+                    "[saliente] respuesta de %s (id=%s, en_respuesta_a=%s, %s bytes): %s",
+                    respuesta.origen,
+                    respuesta.id,
+                    respuesta.en_respuesta_a,
+                    respuesta.ByteSize(),
+                    respuesta.contenido,
+                )
+
+                # Saludo enviado y respondido: restablecer backoff
                 espera = espera_inicial
+
+                # Monitorear conectividad: si el par se cae, reconectar
+                desconexion = threading.Event()
+                fue_ready = threading.Event()
+
+                def _al_cambiar_conectividad(conectividad):
+                    if conectividad == grpc.ChannelConnectivity.READY:
+                        fue_ready.set()
+                    elif fue_ready.is_set() and conectividad in (
+                        grpc.ChannelConnectivity.IDLE,
+                        grpc.ChannelConnectivity.TRANSIENT_FAILURE,
+                        grpc.ChannelConnectivity.SHUTDOWN,
+                    ):
+                        desconexion.set()
+
+                canal.subscribe(_al_cambiar_conectividad, try_to_connect=True)
+
+                # Quedar bloqueado mientras esté conectado, esperando evento de parada o caída
+                while not self._detenido.is_set() and not desconexion.is_set():
+                    self._detenido.wait(timeout=0.5)
+
+                canal.unsubscribe(_al_cambiar_conectividad)
+
+                if self._detenido.is_set():
+                    break
+
+                raise grpc.RpcError("Canal gRPC desconectado por el par")
+
             except grpc.RpcError as error:
                 if self._detenido.is_set():
                     break
                 with self._lock:
                     self._canal_saliente = "reintentando"
                 self._logger.warning(
-                    "[saliente] llamada gRPC a %s:%s fallo (%s: %s). Reintento en %.1fs",
+                    "[saliente] canal gRPC con %s:%s interrumpido o fallido (%s). Reintento en %.1fs",
                     host,
                     puerto,
-                    error.code(),
-                    error.details(),
+                    error.code() if hasattr(error, "code") else error,
                     espera,
                 )
             except Exception:
@@ -238,13 +306,24 @@ class NodoC:
                     puerto,
                     espera,
                 )
+            finally:
+                if canal is not None:
+                    try:
+                        canal.close()
+                    except Exception:
+                        pass
+                with self._lock:
+                    self._canal_grpc_saliente = None
 
-            # Espera antes del siguiente saludo o reintento
+            # Espera interrumpible antes de reintentar si hubo error
             self._detenido.wait(espera)
             espera = min(espera * 2, espera_maxima)
 
         with self._lock:
             self._canal_saliente = "detenido"
+
+    # Alias por compatibilidad hacia atrás
+    _saludar_al_par_continuo = _saludar_al_par
 
     # ------------------------------------------------- registro dinámico con D
 
@@ -321,10 +400,10 @@ class NodoC:
             self.puerto,
         )
 
-        # 2. Si tiene par fijo configurado (estilo Hit #5), inicia el hilo de saludo continuo
+        # 2. Si tiene par fijo configurado (estilo Hit #5), inicia el hilo de saludo al par
         if self.par:
             cliente = threading.Thread(
-                target=self._saludar_al_par_continuo,
+                target=self._saludar_al_par,
                 args=(espera_inicial, espera_maxima, timeout),
                 daemon=True,
             )
@@ -346,6 +425,13 @@ class NodoC:
 
     def detener(self, grace=0.5):
         self._detenido.set()
+        with self._lock:
+            canal = self._canal_grpc_saliente
+        if canal is not None:
+            try:
+                canal.close()
+            except Exception:
+                pass
         self._server.stop(grace=grace)
 
     def esperar(self, duracion=None):

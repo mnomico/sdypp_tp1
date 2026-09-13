@@ -108,6 +108,28 @@ class TestNodoCGrpc(unittest.TestCase):
         self.assertEqual(uno.estado()["formato_mensajes"], "protobuf-grpc")
         self.assertEqual(uno.estado()["estado"], "ok")
 
+    def test_saludo_se_envia_una_sola_vez_por_conexion(self):
+        uno = self._crear_c("C1")
+        dos = self._crear_c("C2")
+        uno.configurar_par("127.0.0.1", dos.puerto)
+        dos.configurar_par("127.0.0.1", uno.puerto)
+
+        uno.iniciar(espera_inicial=0.01)
+        dos.iniciar(espera_inicial=0.01)
+
+        self.assertTrue(
+            self._esperar(
+                lambda: uno.estado()["respuestas_recibidas"] == 1
+                and dos.estado()["respuestas_recibidas"] == 1
+            )
+        )
+        # Esperar un intervalo para constatar que no se envíen saludos periódicos en loop
+        time.sleep(0.1)
+        self.assertEqual(uno.estado()["saludos_enviados"], 1)
+        self.assertEqual(dos.estado()["saludos_enviados"], 1)
+        self.assertEqual(uno.estado()["canal_saliente"], "conectado")
+        self.assertEqual(dos.estado()["canal_saliente"], "conectado")
+
     def test_llamada_grpc_directa_con_stub(self):
         servidor = self._crear_c("C-servidor")
         servidor.iniciar()
