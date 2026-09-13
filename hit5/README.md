@@ -3,6 +3,10 @@
 > Modifiquen el programa C para que los mensajes se envíen en formato JSON,
 > serializando y deserializando al enviar/recibir.
 
+## Demo
+
+https://github.com/user-attachments/assets/c3a3fcb1-9533-4c53-9fad-54f7ebeab016
+
 ## Arquitectura
 
 Mismo nodo bidireccional del Hit #4; cambia **qué** viaja por los canales.
