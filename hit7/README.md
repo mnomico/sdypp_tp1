@@ -10,6 +10,10 @@
 > siguiente— y cada 60 s mueve uno al otro. Las inscripciones se almacenan en un
 > archivo de texto con formato JSON.
 
+## Demo
+
+https://github.com/user-attachments/assets/e040a74e-af2d-4684-9e5b-9838a038ad7f
+
 ## Arquitectura
 
 ```mermaid
