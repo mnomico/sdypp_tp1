@@ -3,6 +3,10 @@
 > Elaboren un código de servidor TCP para B que espere el saludo de A y lo responda.
 > Elaboren un código de cliente TCP para A que se conecte con B y lo salude.
 
+## Demo
+
+https://github.com/user-attachments/assets/0e32884e-2bbf-4382-a788-9b85be69bf9f
+
 ## Arquitectura
 
 ```mermaid

@@ -5,6 +5,10 @@
 > ejecución, cada una configurada con los parámetros del otro, ambas se saludan
 > mutuamente a través de cada canal de comunicación.
 
+## Demo
+
+https://github.com/user-attachments/assets/127f50c0-94d4-4006-9201-6edc55210493
+
 ## Arquitectura
 
 Cada C combina el servidor persistente del Hit #3 y el cliente con reconexión del

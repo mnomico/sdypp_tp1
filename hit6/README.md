@@ -10,6 +10,10 @@
 > responde con las IPs y puertos de los otros C que estén corriendo, y C se conecta a
 > cada uno y envía el saludo.
 
+## Demo
+
+https://github.com/user-attachments/assets/342c3535-0880-4162-b771-1838ef1ce776
+
 ## Arquitectura
 
 D es el directorio centralizado: los C ya no conocen de antemano a sus pares.

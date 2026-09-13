@@ -6,6 +6,10 @@
 > - Reemplacen la serialización/deserialización JSON manual por las llamadas gRPC generadas.
 > - Comparen en el informe: tamaño de los mensajes en bytes (JSON vs Protobuf), latencia de las llamadas y experiencia de desarrollo (código manual vs código generado).
 
+## Demo
+
+https://github.com/user-attachments/assets/280cfb78-deeb-4cca-88d5-8ca79a83d2c3
+
 ## Arquitectura
 
 Se reemplaza el canal de sockets TCP raw con delimitador `\n` y serialización JSON manual por el framework **gRPC** sobre **HTTP/2**, utilizando **Protocol Buffers (proto3)** para la definición estricta del contrato de interfaz (IDL) y la serialización binaria de mensajes.

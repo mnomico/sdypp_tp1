@@ -4,6 +4,10 @@
 > y el envío del saludo nuevamente en caso de que el proceso B cierre la conexión,
 > como por ejemplo, al ser terminado abruptamente.
 
+## Demo
+
+https://github.com/user-attachments/assets/05709adb-1449-4082-ae86-3d1fa8cc3b37
+
 ## Arquitectura
 
 ```mermaid
