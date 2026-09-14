@@ -1,0 +1,22 @@
+# Nada que no haga falta en tiempo de ejecución entra a la imagen.
+.git
+.github
+.gitignore
+.dockerignore
+despliegue/docker-compose.yml
+*.sh
+Dockerfile
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+logs
+estado*.json
+docs
+*.md
+.env
+.env.*
+.vscode
+.idea

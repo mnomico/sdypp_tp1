@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
       - name: Compilar los modulos
-        run: python -m compileall -q comun hit1 hit2 hit3 hit4 hit5 hit6 hit7 hit8
+        run: python -m compileall -q comun hit1 hit2 hit3 hit4 hit5 hit6 hit7 hit8 despliegue
       - name: Pruebas del modulo comun
         run: python -m unittest discover -s comun -t . -v
       - name: Pruebas del Hit 1
@@ -53,6 +53,8 @@ jobs:
         run: python -m unittest discover -s hit7 -t . -v
       - name: Pruebas del Hit 8
         run: python -m unittest discover -s hit8 -t . -v
+      - name: Pruebas del arranque del despliegue
+        run: python -m unittest discover -s despliegue -t . -v
 
   humo:
     name: Prueba de humo end-to-end
@@ -214,3 +216,110 @@ jobs:
           PY
           curl -sf http://127.0.0.1:8501/health | grep -q '"formato_mensajes": "protobuf-grpc"'
           wait
+
+  imagen:
+    name: Imagen Docker del despliegue
+    runs-on: ubuntu-latest
+    # Publica en GHCR y la VM trae sola lo publicado: nada llega al registro sin
+    # gitleaks, las pruebas y la prueba de humo en verde.
+    needs: [gitleaks, pruebas, humo]
+    permissions:
+      contents: read
+      packages: write   # publicar en GHCR con el GITHUB_TOKEN del propio job
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir la imagen
+        # El commit queda horneado en la imagen: el Nodo D lo muestra en su nombre.
+        run: docker build --build-arg TP1_VERSION=$GITHUB_SHA -t sdypp-tp1:ci .
+      - name: Levantar el contenedor y verificar el health
+        run: |
+          docker run -d --name tp1 -p 8080:8080 sdypp-tp1:ci
+          # El arranque levanta D y despues 3 nodos C que se registran contra el:
+          # se espera a que el health responda ok con los tres registrados.
+          python - <<'PY'
+          import json, os, time, urllib.request
+          limite = time.monotonic() + 30
+          estado = None
+          while time.monotonic() < limite:
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2) as r:
+                      estado = json.load(r)
+                  if estado["estado"] == "ok" and estado["cantidad_nodos_c_registrados"] == 3:
+                      break
+              except OSError:
+                  pass
+              time.sleep(1)
+          print(json.dumps(estado, indent=2))
+          assert estado and estado["estado"] == "ok", estado
+          assert estado["cantidad_nodos_c_registrados"] == 3, estado
+          assert estado["nombre"].endswith("@" + os.environ["GITHUB_SHA"][:7]), estado["nombre"]
+          print("Imagen OK:", estado["nodos"])
+          PY
+          # El proceso no corre como root dentro del contenedor.
+          test "$(docker exec tp1 whoami)" = "tp1"
+      - name: Registros del contenedor
+        if: always()
+        run: docker logs tp1 2>&1 | tail -40; docker rm -f tp1 > /dev/null 2>&1 || true
+      - name: Publicar la imagen en GHCR
+        # Solo lo que paso las pruebas y esta en main llega al registro; la VM del
+        # despliegue trae de ahi la imagen :latest. El GITHUB_TOKEN es efimero y lo
+        # emite GitHub para este job: no hay ninguna credencial cargada a mano.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          imagen="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag sdypp-tp1:ci "$imagen:$GITHUB_SHA"
+          docker tag sdypp-tp1:ci "$imagen:latest"
+          docker push "$imagen:$GITHUB_SHA"
+          docker push "$imagen:latest"
+          docker logout ghcr.io
+          echo "Publicada $imagen:$GITHUB_SHA (y :latest)"
+
+  desplegar:
+    name: Despliegue en la VM (AWS EC2)
+    runs-on: ubuntu-latest
+    needs: [gitleaks, humo, imagen]
+    # Solo en push a main y con todo lo anterior en verde. La VM trae sola la imagen
+    # :latest cada minuto (timer de systemd, ver despliegue/README.md); este job comprueba que la imagen
+    # sea publica y no da el despliegue por bueno hasta ver el commit recien pusheado
+    # en el /health publico. No usa ningun secret.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      URL_PUBLICA: ${{ vars.TP1_URL || 'http://18.231.127.74:8080' }}
+    steps:
+      - name: Comprobar que la imagen se puede traer sin credenciales
+        run: |
+          imagen="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if ! docker manifest inspect "$imagen:$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "::error::$imagen no es publica y la VM no va a poder traerla. El dueño del repositorio tiene que cambiar la visibilidad del paquete a Public (ver despliegue/README.md)."
+            exit 1
+          fi
+          echo "$imagen:$GITHUB_SHA es publica"
+      - name: Esperar a que la VM levante este commit
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request
+          url = os.environ["URL_PUBLICA"].rstrip("/") + "/health"
+          sha = os.environ["GITHUB_SHA"][:7]
+          limite = time.monotonic() + 10 * 60   # el timer de la VM mira cada minuto + pull + arranque
+          estado = None
+          while time.monotonic() < limite:
+              try:
+                  with urllib.request.urlopen(url, timeout=10) as r:
+                      estado = json.load(r)
+                  if estado.get("estado") == "ok" and estado.get("nombre", "").endswith("@" + sha):
+                      break
+              except OSError as error:
+                  estado = {"error": str(error)}
+              time.sleep(15)
+          print(json.dumps(estado, indent=2))
+          assert estado and estado.get("estado") == "ok", estado
+          assert estado.get("nombre", "").endswith("@" + sha), f"el health todavia responde otra version: {estado.get('nombre')}"
+          print(f"Despliegue OK en {url}: {estado['cantidad_nodos_c_registrados']} nodos C registrados")
+          PY
+      - name: Resumen
+        run: |
+          echo "### Despliegue publicado en $URL_PUBLICA/health" >> "$GITHUB_STEP_SUMMARY"
+          echo "Imagen: \`ghcr.io/${GITHUB_REPOSITORY,,}:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"

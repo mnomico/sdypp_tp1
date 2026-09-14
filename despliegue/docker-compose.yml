@@ -1,0 +1,23 @@
+# Servicio del despliegue público (ver README.md de esta carpeta).
+#
+# En la VM lo levanta un timer de systemd (ver README.md de esta carpeta), que cada minuto trae
+# la última imagen publicada por el pipeline y la pone a correr. En una máquina cualquiera
+# sirve igual, sin clonar el repositorio:
+#
+#   docker compose -f despliegue/docker-compose.yml up -d
+#   curl -s http://127.0.0.1:8080/health
+services:
+  tp1:
+    image: ghcr.io/mnomico/sdypp_tp1:latest
+    container_name: sdypp-tp1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"           # único puerto publicado: el /health del Nodo D
+    environment:
+      PORT: "8080"
+      TP1_DEMO_NODOS_C: "3"   # nodos C que se registran contra D dentro del contenedor
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"        # los logs del contenedor no llenan el disco de la VM
+        max-file: "3"
