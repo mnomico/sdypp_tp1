@@ -36,6 +36,7 @@ comun/                  # Código compartido
   registro.py           #   Logs en memoria y disco
   health.py             #   Endpoint HTTP /health
   config.py             #   Variables de entorno / .env
+informe/                # Informe completo del TP (PDF + README)
 hit1/ … hit3/           # servidor_b.py + cliente_a.py + tests/ + README.md
 hit4/ … hit5/           # nodo_c.py + tests/ + README.md
 hit6/ … hit7/           # nodo_d.py + nodo_c.py + tests/ + README.md
@@ -156,4 +157,4 @@ instancias en una misma máquina hay que darle a cada una su puerto.
 - `gitleaks` corre en cada push y hace fallar el pipeline si detecta un secret.
 
 ## IA Utilizada
-Claude y Geminis
+Claude y Gemini
