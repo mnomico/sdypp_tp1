@@ -110,7 +110,8 @@ En [`.github/workflows/ci.yml`](../.github/workflows/ci.yml):
    cada minuto. Si hay una imagen `:latest` nueva, la trae y reemplaza el contenedor; si no,
    no hace nada. Docker apaga el contenedor viejo con `SIGTERM`, que `arranque.py` maneja
    cerrando D y los C con gracia. (decidimos esto para evitar poner ssh en los git secret)
-4. Si la IP cambia, cargar la variable de repositorio `TP1_URL` (por ejemplo
+
+   Si la IP cambia, cargar la variable de repositorio `TP1_URL` (por ejemplo
    `http://1.2.3.4:8080`) para que el pipeline verifique la URL correcta, y actualizar este
    README y el principal.
 
