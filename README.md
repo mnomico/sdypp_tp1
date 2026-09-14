@@ -1,6 +1,6 @@
 # Sistemas Distribuidos y Programación Paralela - TP 1
 
-**Grupo Cerberus** — Salvador Baez · Mateo Nomico · Tomás Resnik
+**Grupo Cerberus** — Salvador Baez (195157) · Mateo Nomico (168102) · Tomás Resnik (190168)
 
 **Lenguaje:** Python (≥ 3.11)
 
@@ -36,13 +36,15 @@ comun/                  # Código compartido
   registro.py           #   Logs en memoria y disco
   health.py             #   Endpoint HTTP /health
   config.py             #   Variables de entorno / .env
-informe/                # Informe completo del TP (PDF + README)
 hit1/ … hit3/           # servidor_b.py + cliente_a.py + tests/ + README.md
 hit4/ … hit5/           # nodo_c.py + tests/ + README.md
 hit6/ … hit7/           # nodo_d.py + nodo_c.py + tests/ + README.md
-hit8/                   # nodo_c.py + nodo_d.py + proto/ + tests/ + README.md
+hit8/                   # nodo_c.py + nodo_d.py + proto/ + benchmarks.py + tests/ + README.md
+despliegue/             # Despliegue público: arranque del contenedor, compose + README.md
+informe/                # Informe completo del TP (PDF + README)
+Dockerfile              # Imagen única con todos los hits (multi-stage, sin root)
 .env.example            # Plantilla de configuración (el .env real no se versiona)
-.github/workflows/ci.yml
+.github/workflows/ci.yml   # gitleaks + pruebas + humo + imagen Docker → GHCR + verificación del despliegue
 ```
 
 ## Configuración
@@ -64,9 +66,10 @@ corre sin configurar nada. Para fijar valores propios: `cp .env.example .env`.
 | `TP1_TIMEOUT` | Timeout de socket / RPC (s) | `5.0` |
 | `TP1_TIMEOUT_INACTIVIDAD` | Corte de un canal entrante mudo (s) | `60.0` |
 | `TP1_ESPERA_INICIAL` / `_MAXIMA` | Backoff de reintentos (s) | `0.5` / `5.0` |
+| `PORT` / `TP1_DEMO_NODOS_C` | Sólo en el contenedor: puerto del `/health` y cantidad de nodos C | `8080` / `3` |
 
 No hay direcciones ni credenciales hardcodeadas. En la nube los valores se inyectan
-como variables de entorno y los secrets vienen de GitHub Secrets / Secret Manager.
+como variables de entorno desde `despliegue/docker-compose.yml`.
 
 ## Ejecución rápida
 
@@ -115,9 +118,10 @@ curl http://127.0.0.1:8501/health
 ## Pruebas
 
 ```bash
-python -m unittest discover -s . -t . -v       # toda la suite
-python -m unittest discover -s hit8 -t . -v    # sólo el hit 8
-python -m unittest discover -s comun -t . -v   # sólo el módulo compartido
+python -m unittest discover -s . -t . -v            # toda la suite (82 pruebas)
+python -m unittest discover -s hit8 -t . -v         # sólo el hit 8
+python -m unittest discover -s comun -t . -v        # sólo el módulo compartido
+python -m unittest discover -s despliegue -t . -v   # arranque del contenedor
 ```
 
 ## Registros de actividad
@@ -128,7 +132,8 @@ archivos rotativos en `logs/` (1 MB, 3 de respaldo). `logs/` no se versiona.
 ## Health check
 
 Todos los servicios de larga vida exponen `GET /health` con JSON: estado, uptime y los contadores
-propios de cada rol. Es el endpoint que se usa para verificar el despliegue.
+propios de cada rol. Es el endpoint que se usa para verificar el despliegue (ver
+[Despliegue público](#despliegue-público)).
 
 Escucha en la **misma interfaz que el servicio** (`--host` / `TP1_HOST`): con el
 default `127.0.0.1` sólo responde localmente, y publicarlo requiere `0.0.0.0`
@@ -136,9 +141,36 @@ explícito. Si el puerto está ocupado, el nodo lo registra y sigue funcionando 
 endpoint. Cada nodo acepta `--puerto-health` y `--sin-health`; al correr varias
 instancias en una misma máquina hay que darle a cada una su puerto.
 
-## Integración continua
+## Despliegue público
 
-`.github/workflows/ci.yml`, en cada push y PR a `main`:
+**URL pública del health-check:** http://18.231.127.74:8080/health
+
+```bash
+curl -s http://18.231.127.74:8080/health | python -m json.tool
+```
+
+Corre en una **VM de AWS EC2** (`t3.micro`, Ubuntu + Docker): una imagen Docker con todo el
+repositorio, publicada por el pipeline en `ghcr.io/mnomico/sdypp_tp1`, que arranca el Nodo D
+del Hit #6 con su `/health` en el puerto 8080 y tres nodos C que se registran contra él. El
+health muestra así un registro de contactos real (nodos, puertos aleatorios, uptime) y el
+commit que está sirviendo. La VM trae sola cada imagen nueva que el pipeline publica desde
+`main` con las pruebas en verde. Arquitectura, decisiones, limitaciones y la preparación de la
+VM están en [`despliegue/README.md`](despliegue/).
+
+Para probar la misma imagen sin nube:
+
+```bash
+docker build -t sdypp-tp1 .
+docker run --rm -p 8080:8080 sdypp-tp1
+curl -s http://127.0.0.1:8080/health
+```
+
+O, sin clonar nada, la imagen ya publicada: `docker compose -f despliegue/docker-compose.yml up -d`.
+
+## Integración y despliegue continuos
+
+`.github/workflows/ci.yml`, en cada push y PR a `main` o `dev` (los pasos 4 y 5 sólo publican
+y despliegan desde `main`):
 
 1. **gitleaks** — falla si detecta un secret hardcodeado.
 2. **Pruebas** — `comun` y los Hits #1 a #8 sobre Python 3.11, 3.12 y 3.13.
@@ -146,15 +178,33 @@ instancias en una misma máquina hay que darle a cada una su puerto.
    `kill -9` y B sigue respondiendo el health; dos C se saludan mutuamente; los
    mensajes viajan en JSON; tres C se descubren a través de D; las inscripciones del
    Hit #7 quedan persistidas en disco; y los nodos del Hit #8 se comunican vía gRPC.
+4. **Imagen Docker** — construye la imagen del despliegue con el commit horneado, la levanta,
+   espera a que los tres nodos C estén registrados en D y comprueba que el proceso no corra
+   como root. Sólo en `push` a `main` la publica en GHCR (`:<sha>` y `:latest`).
+5. **Despliegue** (sólo en `push` a `main`, con todo lo anterior en verde) — comprueba que la
+   imagen sea pública y espera a que el `/health` de la VM responda con el SHA del commit
+   recién pusheado antes de dar el job por exitoso. La VM la trae por su cuenta: un timer
+   hace `docker compose pull && up -d` cada minuto.
 
 ## Seguridad
 
 - No se versionan credenciales ni archivos `.env`: sólo la plantilla `.env.example`.
 - No hay direcciones, puertos ni secrets hardcodeados: todo sale de variables de
   entorno con defaults de desarrollo.
-- Las credenciales de despliegue se gestionan con GitHub Secrets y OIDC contra el
-  proveedor de nube, sin claves estáticas en el repositorio.
+- El pipeline no tiene ningún secret cargado a mano: publica la imagen con el `GITHUB_TOKEN`
+  efímero de cada job y la VM la trae de un paquete público, sin clave SSH ni credenciales de
+  AWS en GitHub ni credenciales de GitHub en la VM. Ninguna credencial viaja en el código ni
+  en la imagen.
+- La imagen corre con un usuario sin privilegios, sin secrets en `ENV` ni en el payload.
 - `gitleaks` corre en cada push y hace fallar el pipeline si detecta un secret.
 
+## Informe y video
+
+- **Informe:** [`informe/Informe.pdf`](informe/Informe.pdf) — respuestas a las consignas, métricas y
+  gráficas del Hit #8, diagramas, despliegue, herramientas de IA y conclusiones. El detalle técnico
+  de cada hit (diagrama, ejecución, decisiones) está en el `README.md` de su carpeta.
+- **Video:** cada `README.md` de hit tiene una sección *Demo* con el video de ese hit corriendo.
+
 ## IA Utilizada
+
 Claude y Gemini

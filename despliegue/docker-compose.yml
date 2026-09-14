@@ -1,6 +1,6 @@
 # Servicio del despliegue público (ver README.md de esta carpeta).
 #
-# En la VM lo levanta un timer de systemd (ver README.md de esta carpeta), que cada minuto trae
+# En la VM lo levanta un timer de systemd que cada minuto trae
 # la última imagen publicada por el pipeline y la pone a correr. En una máquina cualquiera
 # sirve igual, sin clonar el repositorio:
 #

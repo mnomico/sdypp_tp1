@@ -1,10 +1,12 @@
 name: CI/CD
 
+# En dev corren gitleaks, las pruebas, el humo y la prueba de la imagen; publicar y
+# desplegar quedan sólo para main (ver los `if` del paso de GHCR y del job desplegar).
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   gitleaks:
