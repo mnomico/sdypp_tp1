@@ -207,4 +207,5 @@ y despliegan desde `main`):
 
 ## IA Utilizada
 
-Claude y Gemini
+Claude (Anthropic) y Gemini (Google). Qué asistente usó cada integrante, en qué hits y para qué
+está detallado en la sección 8 del [informe](informe/Informe.pdf).
