@@ -130,11 +130,14 @@ En [`.github/workflows/ci.yml`](../.github/workflows/ci.yml):
   contenedor y los nodos C corren como procesos hermanos. Para que nodos C de otras máquinas
   se anoten en D alcanza con publicar el 9600 en `docker-compose.yml` y abrirlo en el Security
   Group; se dejó cerrado porque la consigna pide público el health, no el registro.
-- **HTTP plano por IP.** La consigna pide un endpoint público que devuelva JSON; HTTPS exigiría
-  un dominio y un certificado que no aportan nada al TP.
+- **HTTP plano por IP.** La consigna pide un endpoint público que devuelva JSON y no pide HTTPS.
+  Sin TLS no hay cifrado, integridad ni forma de comprobar que responde nuestro servidor, y sin
+  dominio la URL cambia si cambia la IP. Para un health de sólo lectura sin datos sensibles es
+  un riesgo aceptado; dominio y certificado quedan para el TP3 (detalle en la sección 6 del
+  [informe](../informe/Informe.pdf)).
 - **Imagen mínima.** Multi-stage (las dependencias se instalan en una etapa y se copia sólo el
   `venv`), base `python:3.13-slim` versionada, usuario sin privilegios, `HEALTHCHECK`, sin
-  secrets en `ENV`, `.dockerignore` que deja afuera `.git`, `.venv`, `logs/` y `.env`. Pesa 63 MB
+  secrets en `ENV`, `.dockerignore` que deja afuera `.git`, `.venv`, `logs/` y `.env`. Pesa 64 MB
   comprimida.
 - **Estado efímero.** Los logs en disco viven en el sistema de archivos del contenedor y se
   pierden con cada despliegue (Docker rota los del contenedor a 3 × 5 MB para no llenar la VM);
